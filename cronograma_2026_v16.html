@@ -409,6 +409,7 @@
     grid-template-columns: 180px 200px minmax(1664px, 1fr);
     min-width: 2044px;
   }
+  .gantt > * { box-sizing: border-box; }
   .gantt-corner {
     background: var(--mdc-primary); color: white;
     padding: 12px 16px;
@@ -421,7 +422,7 @@
   .gantt-corner.col-recurso { left: 0; }
   .gantt-corner.col-proyecto {
     left: 180px;
-    border-left: 1px solid rgba(255,255,255,0.25);
+    border-left: 4px solid rgba(255,255,255,0.25);
   }
   .gantt-meses {
     background: var(--mdc-primary); color: white;
@@ -459,6 +460,8 @@
     background: white;
     position: sticky; left: 0; z-index: 2;
     display: flex; align-items: center; gap: 8px;
+    min-height: 47px;
+    box-sizing: border-box;
   }
   .res-name.merged-top { border-bottom: none; }
   .res-name.merged-mid {
@@ -477,6 +480,13 @@
     font-weight: 500;
     margin-left: auto;
   }
+  /* Separador visible entre recursos: la última fila de cada recurso lleva
+     un borde inferior más grueso y oscuro que el divisor entre proyectos del mismo recurso. */
+  .res-name.is-last-of-resource,
+  .proj-name.is-last-of-resource,
+  .res-track.is-last-of-resource {
+    border-bottom: 2px solid #9e9e9e !important;
+  }
   .proj-name {
     padding: 12px 14px;
     border-bottom: 1px solid var(--mdc-divider);
@@ -490,6 +500,8 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    min-height: 47px;
+    box-sizing: border-box;
   }
   .proj-name .swatch {
     width: 10px; height: 10px; border-radius: 50%;
@@ -505,7 +517,8 @@
     position: relative;
     border-bottom: 1px solid var(--mdc-divider);
     background: white;
-    min-height: 44px;
+    min-height: 47px;
+    box-sizing: border-box;
   }
   .res-track .grid-bg {
     position: absolute; inset: 0;
@@ -777,7 +790,7 @@
     border-bottom: 1px solid var(--mdc-divider);
     position: sticky; top: 0;
     background: white;
-    z-index: 1;
+    z-index: 2;
   }
   .multi-select-panel .ms-actions button {
     flex: 1;
@@ -790,6 +803,33 @@
     transition: background 0.1s;
   }
   .multi-select-panel .ms-actions button:hover { background: rgba(63,81,181,0.08); }
+  .multi-select-panel .ms-search {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--mdc-divider);
+    background: white;
+    position: sticky; top: 38px;
+    z-index: 1;
+  }
+  .multi-select-panel .ms-search .material-icons {
+    font-size: 18px;
+    color: var(--mdc-on-surface-medium);
+  }
+  .multi-select-panel .ms-search input {
+    flex: 1;
+    border: none; outline: none;
+    padding: 4px 0;
+    font: 400 14px Roboto;
+    background: transparent;
+    color: var(--mdc-on-surface);
+    min-width: 0;
+  }
+  .multi-select-panel .ms-search input::placeholder {
+    color: var(--mdc-on-surface-medium);
+  }
+  .multi-select-panel .ms-options {
+    /* Contenedor de opciones; permite que el scroll afecte solo las opciones */
+  }
   .multi-select-panel .ms-option {
     display: flex; align-items: center; gap: 12px;
     padding: 8px 14px;
@@ -1839,10 +1879,12 @@ function multiSelect({label, items, selected, onChange, allLabel = 'Todos'}) {
     }
   }
 
-  // Refresca solo las clases de las opciones (sin reconstruir el panel)
+  // Refresca solo las clases de las opciones (sin reconstruir el panel).
+  // Usa el valor original (con su tipo) almacenado como propiedad del DOM,
+  // NO el dataset que coerciona todo a string.
   function refreshOptions() {
     panel.querySelectorAll('.ms-option').forEach(opt => {
-      const v = opt.dataset.value;
+      const v = opt._value;
       if (selected.has(v)) opt.classList.add('selected');
       else opt.classList.remove('selected');
     });
@@ -1868,6 +1910,10 @@ function multiSelect({label, items, selected, onChange, allLabel = 'Todos'}) {
     refreshOptions();
   }
 
+  // Estado de búsqueda local del panel (visible solo si > 8 items)
+  let searchQuery = '';
+  const SEARCH_THRESHOLD = 8;
+
   function rebuildPanel() {
     panel.innerHTML = '';
     const actions = el('div', {class: 'ms-actions'}, [
@@ -1881,19 +1927,61 @@ function multiSelect({label, items, selected, onChange, allLabel = 'Todos'}) {
       return;
     }
 
-    items.forEach(it => {
-      const isSel = selected.has(it.value);
-      const opt = el('div', {
-        class: 'ms-option' + (isSel ? ' selected' : ''),
-        'data-value': it.value,
-        onclick: (e) => { e.stopPropagation(); toggle(it.value); },
-      }, [
-        el('div', {class: 'ms-check'}, [el('span', {class:'material-icons'}, ['check'])]),
-        it.color ? el('span', {class: 'ms-color-dot', style: `background:${it.color}`}) : null,
-        el('span', {class: 'ms-text'}, [it.label]),
-      ]);
-      panel.appendChild(opt);
-    });
+    // Búsqueda incremental: solo aparece si hay muchas opciones
+    if (items.length > SEARCH_THRESHOLD) {
+      const searchWrap = el('div', {class: 'ms-search'});
+      const searchIcon = el('span', {class: 'material-icons'}, ['search']);
+      const searchInput = el('input', {
+        type: 'text',
+        placeholder: 'Buscar…',
+        value: searchQuery,
+        // Detener propagación para que el click en el input no cierre el panel
+        onclick: (e) => e.stopPropagation(),
+      });
+      searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value;
+        renderOptions();
+      });
+      // Mantener foco al tipear (no dejar que el panel pierda foco)
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); searchInput.value = ''; searchQuery = ''; renderOptions(); }
+      });
+      searchWrap.appendChild(searchIcon);
+      searchWrap.appendChild(searchInput);
+      panel.appendChild(searchWrap);
+      // Auto-focus al abrir
+      setTimeout(() => searchInput.focus(), 30);
+    }
+
+    // Contenedor de opciones filtrables (separado de actions y search)
+    const optsWrap = el('div', {class: 'ms-options'});
+    panel.appendChild(optsWrap);
+    renderOptions();
+
+    function renderOptions() {
+      optsWrap.innerHTML = '';
+      const q = searchQuery.toLowerCase().trim();
+      const filtered = q ? items.filter(it => String(it.label).toLowerCase().includes(q)) : items;
+
+      if (filtered.length === 0) {
+        optsWrap.appendChild(el('div', {class: 'ms-empty'}, ['Sin coincidencias']));
+        return;
+      }
+
+      filtered.forEach(it => {
+        const isSel = selected.has(it.value);
+        const opt = el('div', {
+          class: 'ms-option' + (isSel ? ' selected' : ''),
+          onclick: (e) => { e.stopPropagation(); toggle(it.value); },
+        }, [
+          el('div', {class: 'ms-check'}, [el('span', {class:'material-icons'}, ['check'])]),
+          it.color ? el('span', {class: 'ms-color-dot', style: `background:${it.color}`}) : null,
+          el('span', {class: 'ms-text'}, [it.label]),
+        ]);
+        opt._value = it.value;
+        optsWrap.appendChild(opt);
+      });
+    }
   }
 
   function open() {
@@ -2323,6 +2411,7 @@ function renderGantt() {
 
       projectGroups.forEach(([projectName, projectSegs], rowIdxInPerson) => {
         const isFirstRow = rowIdxInPerson === 0;
+        const isLastRow = rowIdxInPerson === projectGroups.length - 1;
         const isOnlyRow = projectGroups.length === 1;
 
         // Columna 1: Recurso (mergeado visualmente cuando hay múltiples proyectos)
@@ -2331,6 +2420,7 @@ function renderGantt() {
           if (isFirstRow) resClasses.push('merged-top');
           else resClasses.push('merged-mid');
         }
+        if (isLastRow) resClasses.push('is-last-of-resource');
         const resCell = el('div', {class: resClasses.join(' ')}, [
           el('span', {class: 'name'}, [person.name]),
           (isFirstRow && projectGroups.length > 1)
@@ -2340,7 +2430,9 @@ function renderGantt() {
         grid.appendChild(resCell);
 
         // Columna 2: Proyecto
-        const projCell = el('div', {class: 'proj-name'});
+        const projClasses = ['proj-name'];
+        if (isLastRow) projClasses.push('is-last-of-resource');
+        const projCell = el('div', {class: projClasses.join(' ')});
         if (projectName === '__empty__') {
           projCell.style.borderLeftColor = '#e0e0e0';
           projCell.style.fontStyle = 'italic';
@@ -2355,8 +2447,11 @@ function renderGantt() {
         grid.appendChild(projCell);
 
         // Columna 3: track con las barras del proyecto
-        const trackHeight = 44;
-        const track = el('div', {class: 'res-track', style: `height:${trackHeight}px`});
+        // La altura la define el CSS (.res-track min-height: 47px) para que coincida
+        // con la altura calculada de res-name y proj-name (que tienen padding+contenido).
+        const trackClasses = ['res-track'];
+        if (isLastRow) trackClasses.push('is-last-of-resource');
+        const track = el('div', {class: trackClasses.join(' ')});
         const bg = el('div', {class: 'grid-bg', style: `grid-template-columns: repeat(${N_VISIBLE_SLOTS}, 1fr)`});
         for (let i = 0; i < N_VISIBLE_SLOTS; i++) bg.appendChild(el('div'));
         track.appendChild(bg);
@@ -2383,7 +2478,8 @@ function renderGantt() {
           const visibleLength = lastVis - firstVis + 1;
           const left = (firstVis / N_VISIBLE_SLOTS) * 100;
           const width = (visibleLength / N_VISIBLE_SLOTS) * 100;
-          const top = 8;
+          // Track: 47px alto. Barra: 28px alto. Centrada → top = (47-28)/2 ≈ 9.5 → 9
+          const top = 9;
           const isVac = isVacacion(seg.project);
           const c = projectColor(seg.project);
           const startQ = state.data.meses[Math.floor(seg.start/WEEKS_PER_MONTH)];
@@ -3324,7 +3420,11 @@ function emptyState(iconName, title, subtitle, action) {
 // ============ HELP & RESET ============
 function showHelp() {
   const currentName = getUserName() || '(sin nombre — se pedirá cuando intentes guardar)';
+  const numRecursos = state.data.people.length;
+  const numProyectos = state.data.projects.length;
+
   const content = el('div', {style: 'font-size:14px;line-height:1.6;color:var(--mdc-on-surface)'}, [
+    // === Identidad ===
     el('h4', {style:'margin:8px 0;color:var(--mdc-primary)'}, ['Tu identidad']),
     el('div', {style:'background:var(--mdc-bg);border-radius:4px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap'}, [
       el('span', {class:'material-icons', style:'color:var(--mdc-primary)'}, ['badge']),
@@ -3333,46 +3433,124 @@ function showHelp() {
         el('div', {style:'font-weight:500'}, [currentName]),
       ]),
       btn('Cambiar', {icon:'edit', onclick: () => {
-        clearUserName();
         closeDialog();
-        promptUserName(() => {
-          updateSyncIndicator();
-          snackbar('Nombre actualizado');
-        });
+        changeUserName();
       }}),
     ]),
     el('p', {style:'font-size:12px;color:var(--mdc-on-surface-medium);margin-bottom:16px'}, [
-      'Tu nombre se asocia a cada cambio que guardes. Solo se almacena en este navegador.',
+      'Tu nombre es obligatorio para guardar cambios. Se asocia a cada modificación que hacés y queda registrado en la base de datos compartida.',
     ]),
-    el('h4', {style:'margin:8px 0;color:var(--mdc-primary)'}, ['Cómo usar la herramienta']),
-    el('p', {}, ['Esta herramienta gestiona el cronograma de recursos de i2T desde Mayo a Diciembre 2026 con un modelo de datos relacional: proyectos y recursos como entidades, y asignaciones que los conectan en el tiempo.']),
+
+    // === Estado actual ===
+    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Estado actual del cronograma']),
+    el('p', {}, [
+      `Período: Mayo a Diciembre 2026 · `,
+      el('strong', {}, [String(numRecursos)]), ` recursos · `,
+      el('strong', {}, [String(numProyectos)]), ` proyectos.`
+    ]),
+
+    // === Concepto ===
+    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Conceptos']),
+    el('ul', {style:'padding-left:20px'}, [
+      el('li', {}, [
+        el('strong', {}, ['Recurso: ']),
+        'una persona del equipo. Tiene una sección (DEV STAFFING, FACILITADORES, etc.). La sección "Sin asignar" sirve para placeholders — cuando todavía no sabés a quién asignar.',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['Proyecto: ']),
+        'una iniciativa o tarea. Solo nombre — el color se asigna automáticamente desde una paleta Material y es determinístico (mismo nombre = mismo color siempre).',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['Asignación: ']),
+        'conecta un recurso con un proyecto en un rango de quincenas. Tiene comentario opcional ("hito") que se ve dentro de la barra del Gantt.',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['Tipo de usuario: ']),
+        'atajo que agrupa secciones. "i2T" muestra todas las secciones internas. "CAS" muestra solo recursos del cliente CAS.',
+      ]),
+    ]),
+
+    // === Flujo de trabajo ===
     el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Flujo de trabajo']),
     el('ol', {style:'padding-left:20px'}, [
-      el('li', {}, ['Dar de alta proyectos en la tab "Proyectos" — solo nombre, el color se asigna automáticamente.']),
-      el('li', {}, ['Los 27 recursos ya están dados de alta. Si necesitás más, agregalos en la tab "Recursos".']),
-      el('li', {}, ['Crear asignaciones en la tab "Cronograma" haciendo click en zona vacía de un track o usando el botón flotante "+".']),
-      el('li', {}, ['Detectar conflictos en la tab "Conflictos" cuando alguien tiene >2 proyectos paralelos.']),
+      el('li', {}, ['Dar de alta proyectos en la tab "Proyectos". Solo nombre.']),
+      el('li', {}, ['Dar de alta recursos en la tab "Recursos" (si faltan). La sección es opcional.']),
+      el('li', {}, ['En la tab "Cronograma": click en una zona vacía de un track para asignar, o en una barra existente para editarla.']),
+      el('li', {}, ['Agregar comentarios (hitos) a las asignaciones para que el equipo entienda de qué se trata cada barra.']),
     ]),
-    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Atajos']),
+
+    // === Atajos del Cronograma ===
+    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Atajos del Cronograma']),
     el('ul', {style:'padding-left:20px'}, [
-      el('li', {}, ['Click en una barra del Gantt → editar asignación']),
-      el('li', {}, ['Click en zona vacía del track → crear asignación']),
-      el('li', {}, ['Hover sobre un recurso → aparece botón "+" para agregar carril paralelo']),
-      el('li', {}, ['Buscador filtra por nombre de persona o proyecto']),
-      el('li', {}, ['Esc cierra cualquier diálogo']),
+      el('li', {}, ['Click en una barra → editar asignación (proyecto, fechas, comentario).']),
+      el('li', {}, ['Click en zona vacía de un track → crear asignación (con el proyecto de esa fila pre-seleccionado).']),
+      el('li', {}, ['Esc cierra cualquier diálogo.']),
     ]),
-    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Sobre los colores']),
-    el('p', {}, ['Cada proyecto recibe automáticamente un color distintivo de una paleta Material. El color es determinístico (mismo nombre = mismo color siempre), así si recreás el proyecto con el mismo nombre el color se mantiene. Los proyectos llamados "Vac" o "Vacaciones" reciben tratamiento visual especial (patrón rayado).']),
+
+    // === Filtros ===
+    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Filtros']),
+    el('ul', {style:'padding-left:20px'}, [
+      el('li', {}, ['Buscador: filtra por nombre de recurso, proyecto o comentario. Apretá Enter o el botón "Buscar" para aplicarlo.']),
+      el('li', {}, ['Tipo de usuario: i2T / CAS / Todos. Atajo rápido sobre las secciones.']),
+      el('li', {}, ['Secciones: multi-selección de DEV STAFFING, FACILITADORES, etc.']),
+      el('li', {}, ['Proyectos: multi-selección. Útil para enfocarte en un grupo específico.']),
+      el('li', {}, ['Meses (solo en Cronograma): muestra solo las columnas de los meses elegidos. Las barras que cruzan meses no visibles aparecen recortadas con un indicador visual.']),
+    ]),
+
+    // === Sincronización ===
+    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Sincronización con el equipo']),
+    el('p', {}, [
+      'Cada cambio se guarda automáticamente en la base de datos compartida (~1 segundo después de cada acción). El indicador del footer muestra el estado: ',
+      el('strong', {style:'color:#2e7d32'}, ['✓ Sincronizado']),
+      ' = todo OK; ',
+      el('strong', {style:'color:#c62828'}, ['⚠ Sin conexión']),
+      ' = los cambios quedan en cache local y se sincronizan cuando vuelva la red.',
+    ]),
+    el('p', {}, [
+      'La app chequea cada 30 segundos si otros usuarios hicieron cambios y los aplica automáticamente. También podés forzar la sincronización con el botón ',
+      el('span', {class:'material-icons', style:'font-size:18px;vertical-align:middle'}, ['sync']),
+      ' del toolbar.',
+    ]),
+
+    // === Backup e importación ===
     el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Backup e importación']),
     el('p', {}, [
       'El botón ',
       el('span', {class:'material-icons', style:'font-size:18px;vertical-align:middle'}, ['file_download']),
-      ' del toolbar permite descargar el cronograma como Excel (.xlsx), CSV o JSON. El botón ',
-      el('span', {class:'material-icons', style:'font-size:18px;vertical-align:middle'}, ['upload_file']),
-      ' permite reimportar un Excel exportado previamente — útil si el navegador se reinicia o querés mover los datos a otra computadora. Antes de cada importación, los datos actuales se guardan automáticamente como backup, y podés deshacer la importación con el botón "DESHACER" del snackbar.'
+      ' descarga el cronograma como Excel (.xlsx), CSV o JSON. El Excel incluye 5 hojas: Resumen, Cronograma con formato visual, Proyectos, Recursos y Asignaciones.',
     ]),
-    el('p', {style:'margin-top:16px;font-size:12px;color:var(--mdc-on-surface-medium)'}, [
-      'Los cambios se guardan automáticamente en este navegador (localStorage). Como protección adicional, descargá el Excel periódicamente para tener un respaldo offline.'
+    el('p', {}, [
+      'El botón ',
+      el('span', {class:'material-icons', style:'font-size:18px;vertical-align:middle'}, ['upload_file']),
+      ' importa un Excel exportado previamente, reemplazando los datos actuales por los del archivo. Útil si querés restaurar un estado anterior. Antes de aplicar, mostrás un preview con los cambios; podés deshacer la importación con el botón "DESHACER" del snackbar.',
+    ]),
+
+    // === Restaurar datos originales — ADVERTENCIA ===
+    el('h4', {style:'margin:16px 0 8px;color:var(--mdc-warn)'}, [
+      el('span', {class:'material-icons', style:'font-size:18px;vertical-align:middle;color:var(--mdc-warn)'}, ['warning']),
+      ' Restaurar datos originales',
+    ]),
+    el('div', {style:'background:#ffebee;border-left:4px solid var(--mdc-warn);padding:10px 14px;border-radius:4px;font-size:13px'}, [
+      el('p', {style:'margin-bottom:6px'}, [
+        'El botón ',
+        el('span', {class:'material-icons', style:'font-size:18px;vertical-align:middle'}, ['restore']),
+        ' del toolbar es ',
+        el('strong', {}, ['destructivo']),
+        ': borra TODAS las asignaciones, proyectos y modificaciones que hicieron los usuarios, y vuelve al estado inicial vacío.',
+      ]),
+      el('p', {style:'margin-bottom:6px'}, [
+        'Como esta herramienta es ',
+        el('strong', {}, ['compartida']),
+        ', restaurar afecta a todo el equipo, no solo a vos.',
+      ]),
+      el('p', {style:'font-style:italic'}, [
+        'Antes de usarlo: descargá el Excel para tener un respaldo. Y avisale al equipo por chat. Si te equivocás, podés restaurar desde el último Excel descargado usando el botón de Importar.',
+      ]),
+    ]),
+
+    // === Footer ===
+    el('p', {style:'margin-top:20px;font-size:12px;color:var(--mdc-on-surface-medium);font-style:italic'}, [
+      'Los cambios se guardan en la base de datos compartida (Supabase) y se cachean localmente como respaldo offline. Esta es la versión v17 del cronograma.',
     ]),
   ]);
   dialog({title: 'Ayuda', titleIcon: 'help_outline', content, actions: [btn('Cerrar', {raised:true, onclick: closeDialog})], lg: true});
