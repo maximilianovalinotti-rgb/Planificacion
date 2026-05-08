@@ -3444,13 +3444,36 @@ function openAssignmentDialog(prefill = {}) {
     const pid = Array.from(selectedPeople)[0];
     const person = state.data.people.find(p => p.id === pid);
     if (!person) return;
-    const opts = person.lanes.map((_, i) => ({value: i, label: `Carril ${i+1}`}));
-    opts.push({value: 'new', label: '+ Crear nuevo carril paralelo'});
-    // Default: el laneIdx del prefill si existe y es válido para ESTA persona
-    const defLane = (prefill.personId === pid && prefill.laneIdx != null) ? prefill.laneIdx : 0;
+    // Opciones:
+    //   - 'auto': default en modo creación → el sistema elige el carril (el primero libre o crea uno nuevo)
+    //   - 0,1,2...: carril específico (modo edición o cuando el usuario quiere forzar uno)
+    //   - 'new': forzar la apertura de un carril paralelo nuevo
+    const opts = [];
+    if (!isEdit) {
+      // En modo creación, "auto" es la opción default y recomendada
+      opts.push({value: 'auto', label: '✨ Auto (sistema elige el carril libre)'});
+    }
+    person.lanes.forEach((_, i) => {
+      opts.push({value: i, label: `Carril ${i+1}`});
+    });
+    opts.push({value: 'new', label: '+ Forzar nuevo carril paralelo'});
+
+    // Default:
+    //   - En modo edición: el carril original del prefill (no se puede cambiar a "auto")
+    //   - En modo creación con prefill (click en zona vacía de un track): respetar el carril sugerido
+    //   - En modo creación sin prefill (botón "Nueva asignación"): "auto"
+    let defLane;
+    if (isEdit) {
+      defLane = (prefill.personId === pid && prefill.laneIdx != null) ? prefill.laneIdx : 0;
+    } else if (prefill.personId === pid && prefill.laneIdx != null) {
+      defLane = prefill.laneIdx;
+    } else {
+      defLane = 'auto';
+    }
     const lf = field({
       label: 'Carril *', type: 'select', value: defLane,
       options: opts,
+      hint: !isEdit ? 'Dejá "Auto" salvo que necesites poner la asignación en un carril específico' : '',
     });
     laneFieldWrap.appendChild(lf.wrap);
     laneFieldWrap._field = lf;
@@ -3707,12 +3730,35 @@ function openAssignmentDialog(prefill = {}) {
       }
 
       // Limpiar el rango original si está en el mismo carril
+      // (sólo limpiamos los slots que tienen el proyecto original, para no tocar otras asignaciones)
       if (prefill.personId === personId && prefill.laneIdx === laneIdx) {
         const lane = person.lanes[prefill.laneIdx];
         for (let i = prefill.start; i < prefill.end; i++) {
           if (slotProject(lane[i]) === prefill.projectName) lane[i] = null;
         }
       }
+
+      // VALIDACIÓN DEFENSIVA: en el carril destino, ¿hay asignaciones de OTROS proyectos
+      // en el rango [start, end)? Si sí, no pisamos: avisamos al usuario y abortamos.
+      const targetLane = person.lanes[laneIdx];
+      const conflictSlots = [];
+      for (let i = start; i < end; i++) {
+        if (targetLane[i] != null && slotProject(targetLane[i]) !== projObj.name) {
+          conflictSlots.push({slot: i, project: slotProject(targetLane[i])});
+        }
+      }
+      if (conflictSlots.length > 0) {
+        const sample = conflictSlots[0];
+        const mes = state.data.meses[Math.floor(sample.slot / WEEKS_PER_MONTH)];
+        const sem = WEEK_LABELS[sample.slot % WEEK_LABELS.length];
+        snackbar(
+          `No se puede guardar: el carril destino ya tiene "${sample.project}" en ${mes} ${sem}. ` +
+          `Usá "Forzar nuevo carril paralelo" si querés agregarlo igual.`,
+          { label: 'OK', onclick: () => {} }
+        );
+        return;
+      }
+
       const slotObj = { project: projObj.name, comment };
       const lane = person.lanes[laneIdx];
       for (let i = start; i < end; i++) lane[i] = slotObj;
@@ -3723,17 +3769,26 @@ function openAssignmentDialog(prefill = {}) {
     }
 
     // ===== Modo creación: 1 o N recursos =====
-    // Si hay 1 recurso seleccionado y el usuario eligió un carril específico, lo respetamos.
-    // Si hay 1 sin selector de carril visible (caso raro) o si hay >1, usamos auto-asignación.
+    // Lógica del lane selector (solo aplica cuando hay 1 recurso seleccionado):
+    //   - 'auto'  → auto-asignación: usar primer carril libre, sino crear nuevo (default)
+    //   - número  → carril específico elegido por el usuario
+    //   - 'new'   → forzar nuevo carril paralelo
+    // Si la selección manual de carril apunta a uno con asignaciones existentes en el
+    // rango (de otro proyecto), forzamos auto-asignación para no pisar datos.
     // OJO: si es cross-year, el laneFieldWrap._field puede estar mostrando carriles del año
     // visible original — en ese caso ignoramos la selección manual y usamos auto-asignación,
     // porque los carriles del año destino son distintos (otra estructura).
-    const singleLaneSel = (!isCrossYear && selectedPeople.size === 1 && laneFieldWrap._field)
+    let singleLaneSel = (!isCrossYear && selectedPeople.size === 1 && laneFieldWrap._field)
       ? laneFieldWrap._field.value
       : null;
+    // En cross-year, forzar auto siempre
+    if (isCrossYear && selectedPeople.size === 1) {
+      singleLaneSel = 'auto';
+    }
 
     const newLanesOpened = []; // recursos a los que se les abrió un carril nuevo
     const placedNormally = []; // recursos que fueron al carril seleccionado o existente libre
+    const overflowed = [];     // recursos donde el carril manual elegido estaba ocupado, se les abrió uno nuevo
 
     Array.from(selectedPeople).forEach(personId => {
       const person = state.data.people.find(p => p.id === personId);
@@ -3746,15 +3801,38 @@ function openAssignmentDialog(prefill = {}) {
 
       // Determinar carril
       let laneIdx;
-      if (selectedPeople.size === 1 && singleLaneSel != null && singleLaneSel !== '') {
-        // Usuario eligió explícitamente un carril
+      const explicitLane = (selectedPeople.size === 1 && singleLaneSel != null && singleLaneSel !== '' && singleLaneSel !== 'auto');
+
+      if (explicitLane) {
+        // Usuario eligió explícitamente un carril o "new"
         if (singleLaneSel === 'new') {
           person.lanes.push(Array(TARGET_N_SLOTS).fill(null));
           laneIdx = person.lanes.length - 1;
           newLanesOpened.push(person.name);
         } else {
-          laneIdx = parseInt(singleLaneSel);
-          placedNormally.push(person.name);
+          const requestedLane = parseInt(singleLaneSel);
+          // VALIDACIÓN DEFENSIVA: si el carril elegido tiene algo en el rango, NO pisar.
+          // Forzamos auto-asignación o creación de carril nuevo.
+          if (isRangeFree(person.lanes[requestedLane], start, end)) {
+            laneIdx = requestedLane;
+            placedNormally.push(person.name);
+          } else {
+            // El carril elegido está ocupado: buscar otro libre o crear uno nuevo
+            let placedLane = -1;
+            for (let li = 0; li < person.lanes.length; li++) {
+              if (isRangeFree(person.lanes[li], start, end)) {
+                placedLane = li;
+                break;
+              }
+            }
+            if (placedLane === -1) {
+              person.lanes.push(Array(TARGET_N_SLOTS).fill(null));
+              laneIdx = person.lanes.length - 1;
+            } else {
+              laneIdx = placedLane;
+            }
+            overflowed.push(person.name);
+          }
         }
       } else {
         // Auto-asignación: primer carril donde el rango esté libre, sino crear nuevo
@@ -3794,7 +3872,13 @@ function openAssignmentDialog(prefill = {}) {
     // Snackbar resumen
     const total = selectedPeople.size;
     const yrSuffix = isCrossYear ? ` en ${targetYear}` : '';
-    if (total === 1) {
+    if (overflowed.length > 0) {
+      // Caso especial: el carril elegido estaba ocupado, se buscó otro
+      snackbar(
+        `Asignación creada${yrSuffix}, pero el carril que elegiste estaba ocupado en esas fechas. Se abrió otro carril para no pisar datos: ${overflowed.join(', ')}`,
+        { label: 'OK', onclick: () => {} }
+      );
+    } else if (total === 1) {
       snackbar(`Asignación creada${yrSuffix}`);
     } else if (newLanesOpened.length === 0) {
       snackbar(`Asignación creada para ${total} recursos${yrSuffix}`);
