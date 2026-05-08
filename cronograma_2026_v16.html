@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cronograma 2026 · i2T</title>
+<title>Cronograma · i2T</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
@@ -690,19 +690,14 @@
   .proj-card li .pq { font-size: 11px; color: var(--mdc-on-surface-medium); }
 
   /* ============ FOOTER LEGEND ============ */
-  .footer-legend {
+  .footer-status {
     background: white;
     border-top: 1px solid var(--mdc-divider);
-    padding: 12px 24px;
-    display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
+    padding: 10px 24px;
+    display: flex; align-items: center; justify-content: flex-end;
     font-size: 12px; color: var(--mdc-on-surface-medium);
+    min-height: 22px;
   }
-  .footer-legend .swatch {
-    display: inline-block; width: 14px; height: 14px;
-    border-radius: 2px; margin-right: 6px;
-    vertical-align: middle;
-  }
-  .footer-legend .meta { margin-left: auto; }
 
   /* Dropdown autocomplete */
   .autocomplete-list {
@@ -727,6 +722,33 @@
   .autocomplete-list .item:hover { background: var(--mdc-hover); }
   .autocomplete-list .item.create-new { color: var(--mdc-primary); font-weight: 500; }
   .autocomplete-list .item.create-new .material-icons { font-size: 18px; }
+
+  /* ============ SELECTOR DE AÑO (single-select simple) ============ */
+  .year-select-wrap {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 40px;
+    padding: 0 14px;
+    background: white;
+    border: 1px solid var(--mdc-divider);
+    border-radius: 4px;
+    transition: border-color 0.15s;
+  }
+  .year-select-wrap:focus-within { border-color: var(--mdc-primary); }
+  .year-select-label {
+    font: 500 12px Roboto;
+    color: var(--mdc-on-surface-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .year-select {
+    border: none; outline: none; background: transparent;
+    font: 500 14px Roboto;
+    color: var(--mdc-primary);
+    cursor: pointer;
+    padding: 4px 0;
+    min-width: 80px;
+  }
+  .year-select option { color: var(--mdc-on-surface); font-weight: 400; }
 
   /* ============ MULTI-SELECT (filtros del Gantt) ============ */
   .multi-select {
@@ -931,7 +953,7 @@
   <span class="material-icons">event_note</span>
   <div>
     <h1>Cronograma de Recursos</h1>
-    <div class="subtitle">i2T S.A. · Mayo a Diciembre 2026</div>
+    <div class="subtitle" id="header-subtitle">i2T S.A. · Cronograma anual</div>
   </div>
   <div class="spacer"></div>
   <div class="metrics-inline" id="metrics-inline"></div>
@@ -971,16 +993,9 @@
 <!-- ============ MAIN ============ -->
 <main id="main"></main>
 
-<!-- ============ FOOTER LEGEND ============ -->
-<div class="footer-legend">
-  <span><strong>Secciones:</strong></span>
-  <span><span class="swatch" style="background:#d32f2f"></span>DEV STAFFING</span>
-  <span><span class="swatch" style="background:#f57c00"></span>DEV SIN STAFFING</span>
-  <span><span class="swatch" style="background:#7b1fa2"></span>FACILITADORES</span>
-  <span><span class="swatch" style="background:#00796b"></span>PASANTES</span>
-  <span><span class="swatch" style="background:#388e3c"></span>ANALISTAS</span>
-  <span><span class="swatch" style="background:#455a64"></span>SR</span>
-  <span class="meta" id="storage-status">Cambios persisten en este navegador</span>
+<!-- ============ FOOTER STATUS ============ -->
+<div class="footer-status">
+  <span id="storage-status">Cambios persisten en este navegador</span>
 </div>
 
 <!-- Containers para FAB, dialog, snackbar -->
@@ -1027,10 +1042,28 @@ const PALETTE = [
 ];
 const VAC_STYLE = { dark: '#9e9e9e', mid: '#e0e0e0', light: '#fafafa', text: '#616161' };
 
-// Modelo: el cronograma tiene 8 meses (May-Dic), cada mes con 4 semanas (S1, S2, S3, S4).
-// 8 × 4 = 32 slots por carril (mismo total que el modelo viejo de quincenas, sólo cambia el etiquetado).
+// Modelo: el cronograma tiene meses, cada mes con 4 semanas (S1, S2, S3, S4).
+// 2025: 8 meses (May-Dic) = 32 slots por carril
+// 2026 en adelante: 12 meses (Ene-Dic) = 48 slots por carril
 const WEEKS_PER_MONTH = 4;
 const WEEK_LABELS = ['S1','S2','S3','S4'];
+
+const SUPPORTED_YEARS = ['2025', '2026', '2027', '2028', '2029', '2030'];
+const DEFAULT_YEAR = '2025';
+const MESES_2025 = ["May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+const MESES_FULL = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+function defaultMesesForYear(y) {
+  return y === '2025' ? MESES_2025.slice() : MESES_FULL.slice();
+}
+
+function makeEmptyLanesForYear(year, peopleIds) {
+  const meses = defaultMesesForYear(year);
+  const nSlots = meses.length * WEEKS_PER_MONTH;
+  const lanesPerPerson = {};
+  peopleIds.forEach(pid => { lanesPerPerson[pid] = [Array(nSlots).fill(null)]; });
+  return { meses, lanesPerPerson };
+}
 
 const STORAGE_KEY = 'i2t_planning_v4';
 
@@ -1048,9 +1081,143 @@ let state = {
   // Se inicializa lazy en renderTopFilters según los meses existentes.
   activeMonths: null,
   editing: null,
+  // === Multi-año ===
+  // currentYear: el año visible activo. state.data refleja los datos de este año.
+  // allYears: { '2025': {meses, lanesPerPerson}, '2026': {...}, ... }
+  // Los proyectos y la lista de people son compartidos entre años.
+  currentYear: DEFAULT_YEAR,
+  allYears: null,  // se llena en loadState, lazy
 };
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+// ============ MULTI-AÑO HELPERS ============
+
+// Construye un allYears vacío con todos los años soportados.
+// peopleIds: lista de IDs de personas para inicializar lanes vacíos.
+function makeEmptyAllYears(peopleIds) {
+  const all = {};
+  SUPPORTED_YEARS.forEach(y => {
+    all[y] = makeEmptyLanesForYear(y, peopleIds);
+  });
+  return all;
+}
+
+// Migración: el formato viejo (state.data con meses + people con lanes) se convierte
+// al nuevo formato multi-año asumiendo que esos datos son del año DEFAULT_YEAR.
+function migrateLegacyData(legacyData) {
+  // legacyData = { meses: [...], projects: [...], people: [{id, name, category, lanes: [...]}] }
+  // Si ya tiene allYears, no migrar.
+  if (legacyData.allYears && legacyData.currentYear) return legacyData;
+  if (!legacyData.meses || !legacyData.people) return legacyData;
+
+  const peopleIds = legacyData.people.map(p => p.id);
+  const allYears = makeEmptyAllYears(peopleIds);
+
+  // Inyectar los meses y lanes existentes en el año por defecto
+  const targetYearData = {
+    meses: legacyData.meses.slice(),
+    lanesPerPerson: {},
+  };
+  legacyData.people.forEach(p => {
+    targetYearData.lanesPerPerson[p.id] = (p.lanes || []).map(l => l.slice());
+  });
+  allYears[DEFAULT_YEAR] = targetYearData;
+
+  // people sin lanes (ahora viven en allYears)
+  const cleanPeople = legacyData.people.map(p => ({
+    id: p.id, name: p.name, category: p.category,
+  }));
+
+  return {
+    currentYear: DEFAULT_YEAR,
+    allYears,
+    projects: legacyData.projects || [],
+    people: cleanPeople,
+  };
+}
+
+// Sincroniza el contenido de state.data ↔ state.allYears para el año actual.
+// state.data tiene la forma "legacy" (meses + people con lanes) que el resto del
+// código entiende. Esta función la rehidrata desde state.allYears[currentYear].
+function syncDataFromYear() {
+  const yd = state.allYears[state.currentYear];
+  if (!yd) {
+    // El año no existe, crearlo vacío
+    const peopleIds = (state.data?.people || []).map(p => p.id);
+    state.allYears[state.currentYear] = makeEmptyLanesForYear(state.currentYear, peopleIds);
+  }
+  const yearData = state.allYears[state.currentYear];
+  // Reconstruir state.data
+  const peopleList = state.data?.people || [];
+  state.data = {
+    meses: yearData.meses.slice(),
+    projects: state.data?.projects || [],
+    people: peopleList.map(p => ({
+      id: p.id, name: p.name, category: p.category,
+      lanes: (yearData.lanesPerPerson[p.id] || [Array(yearData.meses.length * WEEKS_PER_MONTH).fill(null)])
+              .map(l => l.slice()),
+    })),
+  };
+}
+
+// Inverso de syncDataFromYear: persiste los cambios actuales de state.data al allYears.
+function syncYearFromData() {
+  if (!state.allYears) return;
+  const y = state.currentYear;
+  if (!state.allYears[y]) {
+    state.allYears[y] = { meses: state.data.meses.slice(), lanesPerPerson: {} };
+  }
+  state.allYears[y].meses = state.data.meses.slice();
+  const lpp = {};
+  state.data.people.forEach(p => {
+    lpp[p.id] = (p.lanes || []).map(l => l.slice());
+  });
+  state.allYears[y].lanesPerPerson = lpp;
+}
+
+// Cambiar el año visible. Llamado desde el filtro.
+function switchYear(newYear) {
+  if (!SUPPORTED_YEARS.includes(newYear)) return;
+  if (newYear === state.currentYear) return;
+
+  // Antes de cambiar, persistir cualquier modificación pendiente del año actual
+  syncYearFromData();
+  state.currentYear = newYear;
+  // Si el año destino no existe (ej: nueva instalación), crearlo
+  if (!state.allYears[newYear]) {
+    const peopleIds = state.data.people.map(p => p.id);
+    state.allYears[newYear] = makeEmptyLanesForYear(newYear, peopleIds);
+  }
+  // Reconstruir state.data con los datos del nuevo año
+  syncDataFromYear();
+  // Resetear filtros que dependen del rango temporal (los meses cambian entre años)
+  state.activeMonths = null;
+  saveState();
+  render();
+}
+
+// Sincroniza la lista de personas en todos los años (cuando se agrega o quita una persona)
+function syncPeopleAcrossYears() {
+  if (!state.allYears) return;
+  const currentIds = new Set(state.data.people.map(p => p.id));
+  // Agregar lanes vacíos para personas nuevas en todos los años (excepto el actual,
+  // que ya tiene lanes en state.data)
+  SUPPORTED_YEARS.forEach(y => {
+    if (!state.allYears[y]) return;
+    const yd = state.allYears[y];
+    const nSlots = yd.meses.length * WEEKS_PER_MONTH;
+    state.data.people.forEach(p => {
+      if (!yd.lanesPerPerson[p.id]) {
+        yd.lanesPerPerson[p.id] = [Array(nSlots).fill(null)];
+      }
+    });
+    // Quitar lanes de personas eliminadas
+    Object.keys(yd.lanesPerPerson).forEach(pid => {
+      if (!currentIds.has(pid)) delete yd.lanesPerPerson[pid];
+    });
+  });
+}
 
 // ============ PERSISTENCIA ============
 // =============================================================================
@@ -1313,9 +1480,17 @@ async function loadState() {
     }
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed?.people && parsed?.projects) {
+      const isMultiYear = parsed?.allYears && parsed?.currentYear && parsed?.people;
+      const isLegacy = parsed?.people && parsed?.projects && parsed?.meses;
+
+      if (isMultiYear) {
+        // Formato nuevo: lo tomamos tal cual; normalizeMultiYearState lo rehidrata.
+        state.data = parsed;
+        localOK = true;
+      } else if (isLegacy) {
+        // Formato viejo: aplicar migraciones de slots y quincenas
         // Migración slots string → objeto
-        parsed.people.forEach(p => p.lanes.forEach(lane => {
+        parsed.people.forEach(p => (p.lanes || []).forEach(lane => {
           for (let i = 0; i < lane.length; i++) {
             if (typeof lane[i] === 'string') {
               lane[i] = { project: lane[i], comment: '' };
@@ -1345,8 +1520,10 @@ async function loadState() {
   if (sync.enabled) {
     try {
       const fresh = await supabaseLoad();
-      const remoteHasData = fresh && fresh.data && fresh.data.people && fresh.data.meses;
-      if (remoteHasData) {
+      // El backend puede tener: formato nuevo (allYears) o legacy (meses + people con lanes)
+      const remoteHasNewFormat = fresh?.data?.allYears && fresh?.data?.currentYear && fresh?.data?.people;
+      const remoteHasLegacy = fresh?.data?.people && fresh?.data?.meses;
+      if (remoteHasNewFormat || remoteHasLegacy) {
         state.data = fresh.data;
         sync.online = true;
         sync.lastVersion = fresh.version;
@@ -1357,12 +1534,12 @@ async function loadState() {
       } else if (localOK) {
         // Backend vacío pero tenemos datos locales válidos → hacer un push inicial
         // para que los otros usuarios vean estos datos.
-        // OJO: solo si ya hay nombre de usuario; si no, dejamos que el primer save real
-        // (después de que el usuario complete el diálogo) haga el push.
         sync.online = true;
         if (getUserName()) {
           try {
-            const res = await supabaseSave(state.data);
+            // Normalizar primero para que el push lleve el formato multi-año
+            normalizeMultiYearState();
+            const res = await supabaseSave(buildPersistencePayload());
             sync.lastVersion = res?.version;
             sync.lastUpdatedAt = res?.updated_at;
             sync.lastUpdatedBy = res?.updated_by;
@@ -1382,10 +1559,77 @@ async function loadState() {
     // Iniciar polling si corresponde
     startPolling();
   }
+
+  // Normalización multi-año: detectar formato y rehidratar state correctamente.
+  normalizeMultiYearState();
   updateSyncIndicator();
 }
 
+// Toma lo que esté en state.data y lo normaliza al formato multi-año.
+// Llamado al inicio y después de cada poll/refresh remoto.
+function normalizeMultiYearState() {
+  // Caso 1: state.data ya tiene allYears (formato nuevo) → solo necesitamos rehidratar
+  // state.data al año actual.
+  if (state.data?.allYears && state.data?.currentYear) {
+    state.allYears = state.data.allYears;
+    state.currentYear = state.data.currentYear;
+    // Asegurar que existen todos los años soportados (lazy init para los que falten)
+    SUPPORTED_YEARS.forEach(y => {
+      if (!state.allYears[y]) {
+        const peopleIds = (state.data.people || []).map(p => p.id);
+        state.allYears[y] = makeEmptyLanesForYear(y, peopleIds);
+      }
+    });
+    // Reconstruir state.data con projects + people sin lanes + meses + people con lanes del año actual
+    const projects = state.data.projects || [];
+    const people = state.data.people || [];
+    state.data = {
+      meses: state.allYears[state.currentYear].meses.slice(),
+      projects,
+      people: people.map(p => ({
+        id: p.id, name: p.name, category: p.category,
+        lanes: (state.allYears[state.currentYear].lanesPerPerson[p.id] || [Array(state.allYears[state.currentYear].meses.length * WEEKS_PER_MONTH).fill(null)])
+                .map(l => l.slice()),
+      })),
+    };
+    return;
+  }
+
+  // Caso 2: state.data tiene formato legacy (meses + people con lanes) → migrar
+  if (state.data?.meses && state.data?.people) {
+    const migrated = migrateLegacyData(state.data);
+    state.allYears = migrated.allYears;
+    state.currentYear = migrated.currentYear;
+    // Construir state.data al formato que el resto del código espera
+    state.data = {
+      meses: migrated.allYears[migrated.currentYear].meses.slice(),
+      projects: migrated.projects,
+      people: migrated.people.map(p => ({
+        id: p.id, name: p.name, category: p.category,
+        lanes: migrated.allYears[migrated.currentYear].lanesPerPerson[p.id].map(l => l.slice()),
+      })),
+    };
+    return;
+  }
+}
+
 // Persistencia: cache en localStorage inmediatamente, debounce hacia Supabase
+// Construye el payload completo para Supabase: incluye allYears con TODOS los años
+// (no solo el actual), projects, people sin lanes, currentYear.
+// Esto garantiza que cualquier cliente que lea de Supabase ve todos los años.
+function buildPersistencePayload() {
+  // Antes de construir, sincronizar el año actual (state.data → state.allYears)
+  syncYearFromData();
+  return {
+    currentYear: state.currentYear,
+    allYears: state.allYears || {},
+    projects: state.data.projects || [],
+    people: (state.data.people || []).map(p => ({
+      id: p.id, name: p.name, category: p.category,
+    })),
+  };
+}
+
 function saveState() {
   const userName = getUserName();
   if (!userName) {
@@ -1400,8 +1644,11 @@ function saveState() {
     return;
   }
 
-  // Cache local instantáneo (siempre, aunque no haya backend)
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data)); } catch(e) {}
+  // Sincronizar lista de personas en todos los años por si se agregaron/quitaron
+  syncPeopleAcrossYears();
+
+  // Cache local: guardar la estructura completa multi-año
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPersistencePayload())); } catch(e) {}
 
   if (!sync.enabled) {
     updateSyncIndicator();
@@ -1424,7 +1671,8 @@ async function flushSave() {
   sync.saving = true;
   updateSyncIndicator();
   try {
-    const res = await supabaseSave(state.data);
+    const payload = buildPersistencePayload();
+    const res = await supabaseSave(payload);
     sync.online = true;
     sync.lastVersion = res?.version ?? sync.lastVersion;
     sync.lastUpdatedAt = res?.updated_at ?? new Date().toISOString();
@@ -1520,11 +1768,20 @@ async function checkRemote() {
         // Recargar todo el data
         const fresh = await supabaseLoad();
         if (fresh?.data?.people) {
+          // Preservar el año actual seleccionado por el usuario aunque el remote diga otro
+          const userSelectedYear = state.currentYear;
           state.data = fresh.data;
           sync.lastVersion = fresh.version;
           sync.lastUpdatedAt = fresh.updated_at;
           sync.lastUpdatedBy = fresh.updated_by;
-          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data)); } catch(e) {}
+          // Re-normalizar para garantizar formato multi-año
+          normalizeMultiYearState();
+          // Si el usuario tenía un año seleccionado, mantenerlo
+          if (userSelectedYear && state.allYears && state.allYears[userSelectedYear]) {
+            state.currentYear = userSelectedYear;
+            syncDataFromYear();
+          }
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPersistencePayload())); } catch(e) {}
           render();
           showRemoteChangeNotice(fresh.updated_by);
         }
@@ -1556,12 +1813,18 @@ async function manualRefresh() {
   try {
     const fresh = await supabaseLoad();
     if (fresh?.data?.people) {
+      const userSelectedYear = state.currentYear;
       state.data = fresh.data;
       sync.online = true;
       sync.lastVersion = fresh.version;
       sync.lastUpdatedAt = fresh.updated_at;
       sync.lastUpdatedBy = fresh.updated_by;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data)); } catch(e) {}
+      normalizeMultiYearState();
+      if (userSelectedYear && state.allYears && state.allYears[userSelectedYear]) {
+        state.currentYear = userSelectedYear;
+        syncDataFromYear();
+      }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPersistencePayload())); } catch(e) {}
       render();
       updateSyncIndicator();
       if (typeof snackbar === 'function') snackbar('Cronograma actualizado');
@@ -2228,6 +2491,24 @@ function renderTopFilters() {
   projSelect.wrap.style.minWidth = '260px';
   row.appendChild(projSelect.wrap);
 
+  // Selector de Año (single-select, solo en vista Cronograma)
+  if (state.view === 'gantt') {
+    const yearWrap = el('div', {class: 'year-select-wrap'});
+    const yearLabel = el('span', {class: 'year-select-label'}, ['Año:']);
+    const yearSel = el('select', {
+      class: 'year-select',
+      onchange: (e) => switchYear(e.target.value),
+    });
+    SUPPORTED_YEARS.forEach(y => {
+      const opt = el('option', {value: y}, [y]);
+      if (y === state.currentYear) opt.selected = true;
+      yearSel.appendChild(opt);
+    });
+    yearWrap.appendChild(yearLabel);
+    yearWrap.appendChild(yearSel);
+    row.appendChild(yearWrap);
+  }
+
   // Multi-select: Meses (solo en vista Cronograma)
   if (state.view === 'gantt') {
     const monthItems = state.data.meses.map((m, i) => ({
@@ -2509,7 +2790,7 @@ function renderGantt() {
             title: titleParts.join('\n'),
             onclick: (e) => {
               e.stopPropagation();
-              openAssignmentDialog({ personId: person.id, laneIdx: seg.lane, start: seg.start, end: seg.start + seg.length, projectName: seg.project, comment: seg.comment });
+              openAssignmentDialog({ _edit: true, personId: person.id, laneIdx: seg.lane, start: seg.start, end: seg.start + seg.length, projectName: seg.project, comment: seg.comment });
             }
           }, barChildren);
           track.appendChild(bar);
@@ -3054,9 +3335,31 @@ function confirmDeletePerson(person) {
 
 // ============ DIALOG: ASSIGNMENT (asignar persona+proyecto+fechas) ============
 function openAssignmentDialog(prefill = {}) {
-  // prefill puede traer: personId, projectName, laneIdx, start, end
-  const isEdit = prefill.personId && prefill.laneIdx != null && prefill.projectName;
-  const N_SLOTS = state.data.meses.length * WEEKS_PER_MONTH;
+  // prefill puede traer: personId, projectName, laneIdx, start, end, comment, _edit
+  // Modo EDICIÓN: solo cuando se hizo click en una barra existente (lleva _edit: true).
+  // Modo CREACIÓN: en cualquier otro caso, incluso si vienen valores prefill (click en
+  // zona vacía del track, click en "Asignar" de un proyecto, etc.) — el usuario está
+  // creando una asignación nueva con valores pre-llenados, NO editando.
+  const isEdit = !!prefill._edit;
+
+  // === Año destino de la asignación ===
+  // En modo edición: el año queda fijo (es el año visible). No se puede cambiar.
+  // En modo creación: el usuario puede elegir cualquier año (default = año visible).
+  // targetYear NO es el state.currentYear necesariamente.
+  let targetYear = state.currentYear || DEFAULT_YEAR;
+
+  // Helper: obtener los meses y la cantidad de slots para el año destino actual.
+  // Si el año destino es el actual, leemos de state.data (que tiene los datos vivos).
+  // Si es otro año, leemos de state.allYears[targetYear].
+  function getTargetMeses() {
+    if (targetYear === state.currentYear) return state.data.meses;
+    return state.allYears?.[targetYear]?.meses || defaultMesesForYear(targetYear);
+  }
+  function getTargetSlotsCount() {
+    return getTargetMeses().length * WEEKS_PER_MONTH;
+  }
+
+  let N_SLOTS = getTargetSlotsCount();
 
   // ===== Selector de recursos =====
   // En modo edición: single-select tradicional. Las funciones de carril usan personField.value.
@@ -3215,13 +3518,79 @@ function openAssignmentDialog(prefill = {}) {
     hint: 'Escribí para buscar o crear nuevo'
   });
 
-  // ===== Slots (desde / hasta) - end es INCLUSIVO en la UI =====
-  const slotOpts = [];
-  for (let i = 0; i < N_SLOTS; i++) {
-    slotOpts.push({value: i, label: `${state.data.meses[Math.floor(i/WEEKS_PER_MONTH)]} · ${WEEK_LABELS[i % WEEKS_PER_MONTH]}`});
+  // ===== Selector de Año (solo en modo creación) =====
+  // En edición no se permite cambiar el año porque implicaría reasignar carriles
+  // entre años con distinta cantidad de slots.
+  const yearFieldWrap = el('div', {style: 'margin-bottom: 12px'});
+  function buildYearSelector() {
+    yearFieldWrap.innerHTML = '';
+    if (isEdit) {
+      // Mostrar el año como texto fijo (no editable)
+      const banner = el('div', {
+        style: 'display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--mdc-bg);border-radius:4px;font-size:13px;color:var(--mdc-on-surface-medium)'
+      }, [
+        el('span', {class:'material-icons', style:'font-size:18px;color:var(--mdc-primary)'}, ['event']),
+        el('span', {}, [`Asignación del año `]),
+        el('strong', {style:'color:var(--mdc-on-surface)'}, [String(targetYear)]),
+      ]);
+      yearFieldWrap.appendChild(banner);
+      return;
+    }
+    // Modo creación: dropdown editable
+    const lbl = el('label', {
+      style:'display:block;font-size:12px;color:var(--mdc-on-surface-medium);margin-bottom:4px;font-weight:500;letter-spacing:0.4px',
+    }, ['Año *']);
+    const wrap2 = el('div', {
+      style:'display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;background:white;border:1px solid var(--mdc-divider);border-radius:4px;width:auto'
+    });
+    const sel = el('select', {
+      style:'border:none;outline:none;background:transparent;font:500 14px Roboto;color:var(--mdc-primary);cursor:pointer;padding:4px 0;min-width:80px',
+      onchange: (e) => {
+        targetYear = e.target.value;
+        refreshSlotSelects();
+        updateYearHelpText();
+      },
+    });
+    SUPPORTED_YEARS.forEach(y => {
+      const opt = el('option', {value: y}, [y]);
+      if (y === targetYear) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    wrap2.appendChild(sel);
+    yearFieldWrap.appendChild(lbl);
+    yearFieldWrap.appendChild(wrap2);
+    // Hint dinámico que avisa si el año destino es distinto del visible
+    const hint = el('div', {
+      id: '_year_hint',
+      style:'font-size:12px;color:var(--mdc-on-surface-medium);padding:4px 14px 0',
+    }, []);
+    yearFieldWrap.appendChild(hint);
+    updateYearHelpText();
   }
-  const defStart = prefill.start != null ? prefill.start : 0;
-  const defEndIncl = prefill.end != null ? prefill.end - 1 : defStart + 1;
+  function updateYearHelpText() {
+    const hint = yearFieldWrap.querySelector('#_year_hint');
+    if (!hint) return;
+    if (targetYear !== state.currentYear) {
+      hint.innerHTML = `<span style="color:#e65100">ⓘ</span> Esta asignación se guardará en <strong>${targetYear}</strong>. No vas a verla en el cronograma actual hasta que cambies el filtro de Año a ${targetYear}.`;
+    } else {
+      hint.textContent = '';
+    }
+  }
+  // (buildYearSelector se llama después de inicializar startField/endField,
+  // porque su onchange los referencia)
+  function buildSlotOpts() {
+    const meses = getTargetMeses();
+    const opts = [];
+    const total = meses.length * WEEKS_PER_MONTH;
+    for (let i = 0; i < total; i++) {
+      opts.push({value: i, label: `${meses[Math.floor(i/WEEKS_PER_MONTH)]} · ${WEEK_LABELS[i % WEEKS_PER_MONTH]}`});
+    }
+    return opts;
+  }
+  let slotOpts = buildSlotOpts();
+  // Defaults: si el prefill viene con valores específicos, usarlos. Sino, primer slot.
+  const defStart = (prefill.start != null && prefill.start < N_SLOTS) ? prefill.start : 0;
+  const defEndIncl = (prefill.end != null && (prefill.end - 1) < N_SLOTS) ? (prefill.end - 1) : Math.min(defStart + 1, N_SLOTS - 1);
   const startField = field({
     label: 'Desde *', type: 'select', value: defStart,
     options: slotOpts,
@@ -3232,7 +3601,33 @@ function openAssignmentDialog(prefill = {}) {
     hint: 'Inclusivo — la asignación cubre desde el primero al último, ambos incluidos',
   });
 
+  // Helper: reconstruir las opciones de los selects start/end cuando cambia targetYear.
+  // Preserva la selección si todavía es válida en el año nuevo; si no, resetea a 0.
+  function refreshSlotSelects() {
+    slotOpts = buildSlotOpts();
+    const newTotal = slotOpts.length;
+    [startField, endField].forEach(f => {
+      const sel = f.input;
+      if (!sel) return;
+      const currentVal = parseInt(sel.value);
+      sel.innerHTML = '';
+      slotOpts.forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt.value; o.textContent = opt.label;
+        sel.appendChild(o);
+      });
+      // Preservar valor si sigue siendo válido
+      if (!isNaN(currentVal) && currentVal < newTotal) {
+        sel.value = String(currentVal);
+      } else {
+        sel.value = '0';
+      }
+    });
+    N_SLOTS = newTotal;
+  }
+
   // Construcción inicial
+  buildYearSelector();
   buildPersonSelector();
   buildLaneSelector();
   buildCommentSection();
@@ -3247,7 +3642,7 @@ function openAssignmentDialog(prefill = {}) {
 
     if (selectedPeople.size === 0) { snackbar('Seleccioná al menos un recurso'); return; }
 
-    // Crear proyecto si no existe
+    // Crear proyecto si no existe (los proyectos son globales, compartidos entre años)
     let projObj = state.data.projects.find(p => p.name.toLowerCase() === projectName.toLowerCase());
     if (!projObj) {
       const newId = 'p' + (Math.max(0, ...state.data.projects.map(p => parseInt(p.id.slice(1))||0)) + 1);
@@ -3261,6 +3656,39 @@ function openAssignmentDialog(prefill = {}) {
       return true;
     }
 
+    // ===== Determinar año destino =====
+    // En modo edición: targetYear ya está fijado al año actual (no se cambia).
+    // En modo creación: targetYear es lo que el usuario eligió en el dropdown.
+    const isCrossYear = !isEdit && targetYear !== state.currentYear;
+
+    // Si la asignación va a un año distinto del visible, conmutamos temporalmente
+    // state.data al año destino para reusar toda la lógica existente. Volvemos al
+    // final. NO llamamos a switchYear() para evitar render/save intermedio.
+    const originalYear = state.currentYear;
+    if (isCrossYear) {
+      // Persistir el año original primero
+      syncYearFromData();
+      // Asegurar que el año destino existe
+      if (!state.allYears[targetYear]) {
+        const peopleIds = state.data.people.map(p => p.id);
+        state.allYears[targetYear] = makeEmptyLanesForYear(targetYear, peopleIds);
+      }
+      // Conmutar
+      state.currentYear = targetYear;
+      syncDataFromYear();
+    }
+
+    // Asegurar que cada persona tenga al menos un lane en el año destino
+    state.data.people.forEach(p => {
+      if (!p.lanes || p.lanes.length === 0) {
+        const localSlots = state.data.meses.length * WEEKS_PER_MONTH;
+        p.lanes = [Array(localSlots).fill(null)];
+      }
+    });
+
+    // Recalcular N_SLOTS en función del año destino (importante para "new" lanes)
+    const TARGET_N_SLOTS = state.data.meses.length * WEEKS_PER_MONTH;
+
     // ===== Modo edición: single recurso, lógica idéntica al original =====
     if (isEdit) {
       const personId = personSingleField.value;
@@ -3272,7 +3700,7 @@ function openAssignmentDialog(prefill = {}) {
       const person = state.data.people.find(p => p.id === personId);
       let laneIdx;
       if (laneSel === 'new') {
-        person.lanes.push(Array(N_SLOTS).fill(null));
+        person.lanes.push(Array(TARGET_N_SLOTS).fill(null));
         laneIdx = person.lanes.length - 1;
       } else {
         laneIdx = parseInt(laneSel);
@@ -3297,7 +3725,12 @@ function openAssignmentDialog(prefill = {}) {
     // ===== Modo creación: 1 o N recursos =====
     // Si hay 1 recurso seleccionado y el usuario eligió un carril específico, lo respetamos.
     // Si hay 1 sin selector de carril visible (caso raro) o si hay >1, usamos auto-asignación.
-    const singleLaneSel = (selectedPeople.size === 1 && laneFieldWrap._field) ? laneFieldWrap._field.value : null;
+    // OJO: si es cross-year, el laneFieldWrap._field puede estar mostrando carriles del año
+    // visible original — en ese caso ignoramos la selección manual y usamos auto-asignación,
+    // porque los carriles del año destino son distintos (otra estructura).
+    const singleLaneSel = (!isCrossYear && selectedPeople.size === 1 && laneFieldWrap._field)
+      ? laneFieldWrap._field.value
+      : null;
 
     const newLanesOpened = []; // recursos a los que se les abrió un carril nuevo
     const placedNormally = []; // recursos que fueron al carril seleccionado o existente libre
@@ -3316,7 +3749,7 @@ function openAssignmentDialog(prefill = {}) {
       if (selectedPeople.size === 1 && singleLaneSel != null && singleLaneSel !== '') {
         // Usuario eligió explícitamente un carril
         if (singleLaneSel === 'new') {
-          person.lanes.push(Array(N_SLOTS).fill(null));
+          person.lanes.push(Array(TARGET_N_SLOTS).fill(null));
           laneIdx = person.lanes.length - 1;
           newLanesOpened.push(person.name);
         } else {
@@ -3333,7 +3766,7 @@ function openAssignmentDialog(prefill = {}) {
           }
         }
         if (placedLane === -1) {
-          person.lanes.push(Array(N_SLOTS).fill(null));
+          person.lanes.push(Array(TARGET_N_SLOTS).fill(null));
           laneIdx = person.lanes.length - 1;
           newLanesOpened.push(person.name);
         } else {
@@ -3348,19 +3781,28 @@ function openAssignmentDialog(prefill = {}) {
       for (let i = start; i < end; i++) lane[i] = slotObj;
     });
 
+    // Si la asignación fue a un año distinto del visible, persistir el año destino
+    // y volver al año original que el usuario estaba viendo.
+    if (isCrossYear) {
+      syncYearFromData();           // persiste el año destino con las nuevas asignaciones
+      state.currentYear = originalYear;
+      syncDataFromYear();            // restaura state.data al año visible
+    }
+
     saveState(); closeDialog(); render();
 
     // Snackbar resumen
     const total = selectedPeople.size;
+    const yrSuffix = isCrossYear ? ` en ${targetYear}` : '';
     if (total === 1) {
-      snackbar('Asignación creada');
+      snackbar(`Asignación creada${yrSuffix}`);
     } else if (newLanesOpened.length === 0) {
-      snackbar(`Asignación creada para ${total} recursos`);
+      snackbar(`Asignación creada para ${total} recursos${yrSuffix}`);
     } else if (newLanesOpened.length === total) {
-      snackbar(`${total} recursos asignados — a todos se les abrió un carril paralelo`);
+      snackbar(`${total} recursos asignados${yrSuffix} — a todos se les abrió un carril paralelo`);
     } else {
       snackbar(
-        `${total} recursos asignados. ${newLanesOpened.length} ya tenían algo en esas fechas y se les abrió un carril paralelo: ${newLanesOpened.join(', ')}`,
+        `${total} recursos asignados${yrSuffix}. ${newLanesOpened.length} ya tenían algo en esas fechas y se les abrió un carril paralelo: ${newLanesOpened.join(', ')}`,
         { label: 'OK', onclick: () => {} }
       );
     }
@@ -3383,6 +3825,7 @@ function openAssignmentDialog(prefill = {}) {
         ? 'Modificá los datos de la asignación.'
         : 'Asigná uno o varios recursos al mismo proyecto en un rango de semanas. Si elegís más de uno, el carril se asigna automáticamente para cada uno.'
     ]),
+    yearFieldWrap,
     personFieldWrap,
     laneFieldWrap,
     projField.wrap,
@@ -3444,7 +3887,7 @@ function showHelp() {
     // === Estado actual ===
     el('h4', {style:'margin:16px 0 8px;color:var(--mdc-primary)'}, ['Estado actual del cronograma']),
     el('p', {}, [
-      `Período: Mayo a Diciembre 2026 · `,
+      `Año actual: ${state.currentYear || DEFAULT_YEAR} · `,
       el('strong', {}, [String(numRecursos)]), ` recursos · `,
       el('strong', {}, [String(numProyectos)]), ` proyectos.`
     ]),
@@ -3494,6 +3937,10 @@ function showHelp() {
       el('li', {}, ['Tipo de usuario: i2T / CAS / Todos. Atajo rápido sobre las secciones.']),
       el('li', {}, ['Secciones: multi-selección de DEV STAFFING, FACILITADORES, etc.']),
       el('li', {}, ['Proyectos: multi-selección. Útil para enfocarte en un grupo específico.']),
+      el('li', {}, [
+        el('strong', {}, ['Año (solo en Cronograma): ']),
+        'permite seleccionar el año a planificar (2025 a 2030). Cada año tiene sus propias asignaciones independientes. 2025 muestra Mayo-Diciembre (datos actuales); 2026 en adelante muestra el año calendario completo (Enero-Diciembre).'
+      ]),
       el('li', {}, ['Meses (solo en Cronograma): muestra solo las columnas de los meses elegidos. Las barras que cruzan meses no visibles aparecen recortadas con un indicador visual.']),
     ]),
 
@@ -3557,18 +4004,32 @@ function showHelp() {
 }
 
 function confirmReset() {
+  const yr = state.currentYear || DEFAULT_YEAR;
   dialog({
     title: 'Restaurar datos originales',
     titleIcon: 'restore',
     content: el('div', {}, [
-      el('p', {}, ['Se descartarán todos los cambios y se volverá al estado original importado del Excel. Esta acción no se puede deshacer.']),
+      el('p', {}, [
+        'Se borrarán todas las asignaciones del año ',
+        el('strong', {}, [yr]),
+        '. Los proyectos y recursos se mantienen, y los demás años no se ven afectados.',
+      ]),
+      el('p', {style:'color:var(--mdc-warn);font-size:13px;margin-top:8px'}, [
+        '⚠ Esta herramienta es compartida — la acción afecta a todo el equipo. Antes de continuar, descargá el Excel como backup y avisá por chat.',
+      ]),
     ]),
     actions: [
       btn('Cancelar', {onclick: closeDialog}),
-      btn('Restaurar', {raised:true, warn:true, onclick: () => {
-        state.data = clone(INITIAL);
+      btn(`Borrar asignaciones de ${yr}`, {raised:true, warn:true, onclick: () => {
+        // Vaciar lanes del año actual sin tocar otros años, ni proyectos, ni gente
+        const peopleIds = state.data.people.map(p => p.id);
+        if (state.allYears && state.allYears[yr]) {
+          state.allYears[yr] = makeEmptyLanesForYear(yr, peopleIds);
+        }
+        // Refrescar state.data al año actual ya vaciado
+        syncDataFromYear();
         saveState(); closeDialog(); render();
-        snackbar('Datos restaurados al original');
+        snackbar(`Asignaciones de ${yr} borradas`);
       }}),
     ],
   });
@@ -3894,19 +4355,46 @@ function showImportPreview(parsed, filename) {
   ]);
 
   function applyImport() {
-    // Backup automático del estado actual antes de sobreescribir
+    const yr = state.currentYear || DEFAULT_YEAR;
+    // Backup completo (allYears + projects + people) por si hay que deshacer
     try {
-      localStorage.setItem('i2t_planning_v4_backup', JSON.stringify(state.data));
+      localStorage.setItem('i2t_planning_v4_backup', JSON.stringify(buildPersistencePayload()));
     } catch(e) {}
+
+    // Aplicar la importación SOLO al año actual:
+    //  - meses: del archivo importado
+    //  - lanesPerPerson: del archivo importado
+    //  - projects y people: se reemplazan con los del archivo (son globales en el modelo)
+    state.allYears = state.allYears || {};
+    // Construir el year-data desde lo importado
+    const newYearData = {
+      meses: parsed.meses,
+      lanesPerPerson: {},
+    };
+    parsed.people.forEach(p => {
+      newYearData.lanesPerPerson[p.id] = (p.lanes || []).map(l => l.slice());
+    });
+    state.allYears[yr] = newYearData;
+
+    // people del state pierde sus lanes (los lanes están en allYears)
+    const cleanPeople = parsed.people.map(p => ({
+      id: p.id, name: p.name, category: p.category,
+    }));
+
     state.data = {
       meses: parsed.meses,
       projects: parsed.projects,
-      people: parsed.people,
+      people: parsed.people.map(p => ({
+        id: p.id, name: p.name, category: p.category,
+        lanes: (p.lanes || []).map(l => l.slice()),
+      })),
     };
+    // Asegurar que todos los años tengan entrada para las nuevas personas
+    syncPeopleAcrossYears();
     saveState();
     closeDialog();
     render();
-    snackbar(`Importación completa: ${parsed.people.length} recursos, ${parsed.projects.length} proyectos, ${parsed.assignments.length} asignaciones`, {
+    snackbar(`Importación aplicada al año ${yr}: ${parsed.people.length} recursos, ${parsed.projects.length} proyectos, ${parsed.assignments.length} asignaciones`, {
       label: 'DESHACER', onclick: undoImport
     });
   }
@@ -3929,7 +4417,10 @@ function undoImport() {
     if (!raw) { snackbar('No hay backup disponible para restaurar'); return; }
     const parsed = JSON.parse(raw);
     if (!parsed?.people || !parsed?.projects) throw new Error('Backup corrupto');
+    // El backup puede ser legacy (state.data) o multi-año (payload). Asignamos a state.data
+    // y normalizeMultiYearState lo lleva al formato correcto.
     state.data = parsed;
+    normalizeMultiYearState();
     saveState();
     render();
     snackbar('Datos restaurados desde backup');
@@ -3955,13 +4446,13 @@ function exportCSV() {
     });
   });
   const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  downloadBlob(new Blob(['\ufeff' + csv], {type:'text/csv'}), 'cronograma_2026.csv');
+  downloadBlob(new Blob(['\ufeff' + csv], {type:'text/csv'}), `cronograma_${state.currentYear || DEFAULT_YEAR}.csv`);
   snackbar('CSV descargado');
 }
 
 function exportJSON() {
   const json = JSON.stringify(state.data, null, 2);
-  downloadBlob(new Blob([json], {type:'application/json'}), 'cronograma_2026_backup.json');
+  downloadBlob(new Blob([json], {type:'application/json'}), `cronograma_${state.currentYear || DEFAULT_YEAR}_backup.json`);
   snackbar('JSON descargado — guardalo como backup');
 }
 
@@ -3973,7 +4464,7 @@ async function exportXLSX() {
   snackbar('Generando archivo Excel...');
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'i2T - Cronograma 2026';
+  wb.creator = `i2T - Cronograma ${state.currentYear || DEFAULT_YEAR}`;
   wb.created = new Date();
   wb.modified = new Date();
 
@@ -4455,7 +4946,7 @@ async function exportXLSX() {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
     const today = new Date().toISOString().slice(0, 10);
-    downloadBlob(blob, `cronograma_2026_${today}.xlsx`);
+    downloadBlob(blob, `cronograma_${state.currentYear || DEFAULT_YEAR}_${today}.xlsx`);
     snackbar('Excel descargado correctamente');
   } catch (err) {
     console.error(err);
@@ -4480,6 +4971,19 @@ function render() {
   renderMetrics();
   // Update tab active state
   $$('#tabs .mat-tab').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
+
+  // Subtítulo dinámico según el año actual
+  const subt = $('#header-subtitle');
+  if (subt) {
+    const yr = state.currentYear || DEFAULT_YEAR;
+    const meses = state.data?.meses || [];
+    const firstMes = meses[0] || '';
+    const lastMes = meses[meses.length - 1] || '';
+    const rangeText = (firstMes && lastMes && firstMes !== lastMes)
+      ? `${firstMes} a ${lastMes} ${yr}`
+      : `${yr}`;
+    subt.textContent = `i2T S.A. · ${rangeText}`;
+  }
 
   if (state.view === 'gantt') renderGantt();
   else if (state.view === 'projects-view') renderProjectsView();
