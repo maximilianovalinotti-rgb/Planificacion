@@ -1456,8 +1456,17 @@ const VAC_STYLE = { dark: '#9e9e9e', mid: '#e0e0e0', light: '#fafafa', text: '#6
 const WEEKS_PER_MONTH = 4;
 const WEEK_LABELS = ['S1','S2','S3','S4'];
 
-const SUPPORTED_YEARS = ['2025', '2026', '2027', '2028', '2029', '2030'];
-const DEFAULT_YEAR = '2025';
+// Anios visibles en la UI. 2025 quedo fuera porque las asignaciones se migraron
+// a 2026 (los datos antiguos de 2025 pueden seguir en Supabase pero no se
+// muestran ni editan desde la UI). Si alguien necesita volver a verlos, agregar
+// '2025' al inicio de este array.
+const SUPPORTED_YEARS = ['2026', '2027', '2028', '2029', '2030'];
+// Anio por defecto: el anio en curso, siempre que este en SUPPORTED_YEARS.
+// De esta forma no hay que tocar el codigo cuando pase 2026 -> 2027.
+const DEFAULT_YEAR = (() => {
+  const currentYear = String(new Date().getFullYear());
+  return SUPPORTED_YEARS.includes(currentYear) ? currentYear : SUPPORTED_YEARS[0];
+})();
 const MESES_2025 = ["May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const MESES_FULL = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 
@@ -1624,6 +1633,209 @@ function syncPeopleAcrossYears() {
     Object.keys(yd.lanesPerPerson).forEach(pid => {
       if (!currentIds.has(pid)) delete yd.lanesPerPerson[pid];
     });
+  });
+}
+
+// ============ MIGRACIÓN ENTRE AÑOS ============
+// Calcula el offset de slots entre dos años. Necesario porque 2025 tiene 8 meses
+// (May-Dic = 32 slots) y 2026+ tienen 12 meses (Ene-Dic = 48 slots).
+// Una asignación en "May·S1" debe quedar en "May·S1" en cualquier año.
+// Retorna: cuántos slots agregar al índice del año origen para obtener el del año destino.
+function slotOffsetBetweenYears(fromYear, toYear) {
+  const fromMeses = defaultMesesForYear(fromYear);
+  const toMeses = defaultMesesForYear(toYear);
+  // Buscar dónde empieza el primer mes del origen en el destino
+  const firstMonth = fromMeses[0];
+  const idx = toMeses.indexOf(firstMonth);
+  if (idx === -1) return 0; // fallback raro
+  return idx * WEEKS_PER_MONTH;
+}
+
+// Mueve TODAS las asignaciones de un año a otro, con fusión inteligente:
+// - Si un slot está libre en el destino, se ocupa con el del origen.
+// - Si está ocupado en el destino, se conserva el del destino (NO se pisa).
+// Retorna estadísticas: { moved, collisions, peopleAffected }.
+function moveAssignmentsBetweenYears(fromYear, toYear) {
+  // Asegurar que ambos años existen
+  syncYearFromData(); // persistir cambios pendientes del año visible
+  const peopleIds = state.data.people.map(p => p.id);
+  if (!state.allYears[fromYear]) state.allYears[fromYear] = makeEmptyLanesForYear(fromYear, peopleIds);
+  if (!state.allYears[toYear]) state.allYears[toYear] = makeEmptyLanesForYear(toYear, peopleIds);
+
+  const offset = slotOffsetBetweenYears(fromYear, toYear);
+  const fromY = state.allYears[fromYear];
+  const toY = state.allYears[toYear];
+  const toSlotsCount = toY.meses.length * WEEKS_PER_MONTH;
+
+  let moved = 0, collisions = 0;
+  const affected = new Set();
+
+  Object.entries(fromY.lanesPerPerson).forEach(([pid, fromLanes]) => {
+    if (!toY.lanesPerPerson[pid]) {
+      toY.lanesPerPerson[pid] = [Array(toSlotsCount).fill(null)];
+    }
+    const toLanes = toY.lanesPerPerson[pid];
+
+    fromLanes.forEach((fromLane, laneIdx) => {
+      // Asegurar que el lane existe en el destino
+      while (toLanes.length <= laneIdx) toLanes.push(Array(toSlotsCount).fill(null));
+      const toLane = toLanes[laneIdx];
+
+      for (let i = 0; i < fromLane.length; i++) {
+        const slot = fromLane[i];
+        if (slot == null) continue;
+        const targetIdx = i + offset;
+        if (targetIdx < 0 || targetIdx >= toSlotsCount) continue; // fuera de rango
+        if (toLane[targetIdx] != null) {
+          collisions++; // ya hay algo, NO pisamos
+        } else {
+          toLane[targetIdx] = slot;
+          moved++;
+          affected.add(pid);
+        }
+      }
+    });
+
+    // Vaciar las lanes del año origen (solo si efectivamente se movió algo)
+    fromY.lanesPerPerson[pid] = fromLanes.map(lane => Array(lane.length).fill(null));
+  });
+
+  return { moved, collisions, peopleAffected: affected.size };
+}
+
+// Cuenta cuántas asignaciones (slots no-null) tiene un año.
+function countAssignmentsInYear(year) {
+  if (!state.allYears?.[year]) return { slots: 0, people: 0 };
+  const yd = state.allYears[year];
+  let slots = 0;
+  const peopleSet = new Set();
+  Object.entries(yd.lanesPerPerson).forEach(([pid, lanes]) => {
+    let personHas = false;
+    lanes.forEach(lane => {
+      lane.forEach(s => { if (s != null) { slots++; personHas = true; } });
+    });
+    if (personHas) peopleSet.add(pid);
+  });
+  return { slots, people: peopleSet.size };
+}
+
+// Diálogo de migración masiva entre años. Pide confirmación, hace backup
+// automático JSON antes de mover, y aplica fusión inteligente (no pisa slots
+// ocupados en el destino).
+function openMoveAssignmentsBetweenYearsDialog() {
+  // Defaults: origen 2025, destino 2026 (caso típico del usuario)
+  // Defaults: primer y segundo anio disponibles.
+  let fromYear = SUPPORTED_YEARS[0];
+  let toYear = SUPPORTED_YEARS[1] || SUPPORTED_YEARS[0];
+
+  const summaryDiv = el('div');
+  function refreshSummary() {
+    syncYearFromData();
+    const fromStats = countAssignmentsInYear(fromYear);
+    const toStats = countAssignmentsInYear(toYear);
+    summaryDiv.innerHTML = '';
+    if (fromYear === toYear) {
+      summaryDiv.appendChild(el('div', {
+        style: 'padding:14px;background:#fff3e0;border-radius:4px;color:#e65100;font-size:13px'
+      }, ['Seleccioná años distintos para origen y destino.']));
+      return;
+    }
+    const offset = slotOffsetBetweenYears(fromYear, toYear);
+    summaryDiv.appendChild(el('div', {
+      style: 'padding:14px;background:var(--mdc-bg);border-radius:4px;font-size:13px;line-height:1.6'
+    }, [
+      el('div', {style:'margin-bottom:8px'}, [
+        el('strong', {}, [`Año origen ${fromYear}: `]),
+        `${fromStats.slots} semanas asignadas en ${fromStats.people} recurso${fromStats.people === 1 ? '' : 's'}`,
+      ]),
+      el('div', {style:'margin-bottom:8px'}, [
+        el('strong', {}, [`Año destino ${toYear}: `]),
+        toStats.slots === 0
+          ? 'vacío (ideal para migrar)'
+          : `${toStats.slots} semanas ya asignadas en ${toStats.people} recurso${toStats.people === 1 ? '' : 's'}`,
+      ]),
+      toStats.slots > 0 ? el('div', {
+        style:'padding:10px;background:#fff3e0;border-radius:4px;color:#e65100;font-size:12px;margin-top:8px'
+      }, [
+        el('span', {class:'material-icons', style:'font-size:16px;vertical-align:middle;margin-right:4px'}, ['warning']),
+        `Fusión inteligente: las semanas ya ocupadas en ${toYear} NO se pisan. Solo se mueven las que caen en slots libres.`
+      ]) : null,
+    ]));
+  }
+  refreshSummary();
+
+  // Selectores de año origen/destino
+  const fromField = field({
+    label: 'Año origen *', type: 'select', value: fromYear,
+    options: SUPPORTED_YEARS.map(y => ({value: y, label: y})),
+  });
+  fromField.input.addEventListener('change', () => {
+    fromYear = fromField.value;
+    refreshSummary();
+  });
+  const toField = field({
+    label: 'Año destino *', type: 'select', value: toYear,
+    options: SUPPORTED_YEARS.map(y => ({value: y, label: y})),
+  });
+  toField.input.addEventListener('change', () => {
+    toYear = toField.value;
+    refreshSummary();
+  });
+
+  const content = el('div', {style:'min-width:480px;display:flex;flex-direction:column;gap:14px'}, [
+    el('div', {style:'color:var(--mdc-on-surface-medium);font-size:14px;line-height:1.5'}, [
+      'Esta operación mueve todas las asignaciones del año origen al año destino y deja el año origen vacío. ',
+      el('strong', {}, ['Antes de mover, se descarga automáticamente un backup JSON para que puedas revertir si hace falta.']),
+    ]),
+    el('div', {style:'display:flex;gap:12px;align-items:end'}, [
+      el('div', {style:'flex:1'}, [fromField.wrap]),
+      el('span', {class:'material-icons', style:'color:var(--mdc-primary);font-size:32px;margin-bottom:8px'}, ['arrow_forward']),
+      el('div', {style:'flex:1'}, [toField.wrap]),
+    ]),
+    summaryDiv,
+  ]);
+
+  dialog({
+    title: 'Mover asignaciones entre años',
+    titleIcon: 'compare_arrows',
+    content,
+    actions: [
+      btn('Cancelar', {onclick: closeDialog}),
+      btn('Mover asignaciones', {raised: true, icon: 'compare_arrows', onclick: async () => {
+        if (fromYear === toYear) {
+          snackbar('Seleccioná años distintos para origen y destino.');
+          return;
+        }
+        const fromStats = countAssignmentsInYear(fromYear);
+        if (fromStats.slots === 0) {
+          snackbar(`El año ${fromYear} no tiene asignaciones para mover.`);
+          return;
+        }
+        // 1) Descargar backup automático ANTES de cualquier cambio
+        try {
+          exportJSON();
+        } catch (e) {
+          console.error('Backup failed:', e);
+          if (!confirm('No se pudo generar el backup automático. ¿Querés continuar sin backup? (No recomendado)')) return;
+        }
+        // 2) Ejecutar la migración
+        const result = moveAssignmentsBetweenYears(fromYear, toYear);
+        // 3) Refrescar state.data si el año visible es alguno de los afectados
+        if (state.currentYear === fromYear || state.currentYear === toYear) {
+          syncDataFromYear();
+        }
+        // 4) Persistir y renderizar
+        saveState();
+        closeDialog();
+        render();
+        // 5) Mostrar resultado
+        let msg = `✓ Movidas ${result.moved} semanas en ${result.peopleAffected} recurso${result.peopleAffected === 1 ? '' : 's'} de ${fromYear} a ${toYear}.`;
+        if (result.collisions > 0) {
+          msg += ` ${result.collisions} semanas no se movieron porque el slot ya estaba ocupado en ${toYear}.`;
+        }
+        snackbar(msg);
+      }}),
+    ],
   });
 }
 
@@ -4506,22 +4718,13 @@ function openAssignmentDialog(prefill = {}) {
   // ===== Selector de Año (solo en modo creación) =====
   // En edición no se permite cambiar el año porque implicaría reasignar carriles
   // entre años con distinta cantidad de slots.
+  // En edición: guardar el año original para detectar "mover entre años" al guardar.
+  // El usuario PUEDE cambiar el año desde el dropdown (igual que en creación).
+  const originalYear = targetYear;
   const yearFieldWrap = el('div', {style: 'margin-bottom: 12px'});
   function buildYearSelector() {
     yearFieldWrap.innerHTML = '';
-    if (isEdit) {
-      // Mostrar el año como texto fijo (no editable)
-      const banner = el('div', {
-        style: 'display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--mdc-bg);border-radius:4px;font-size:13px;color:var(--mdc-on-surface-medium)'
-      }, [
-        el('span', {class:'material-icons', style:'font-size:18px;color:var(--mdc-primary)'}, ['event']),
-        el('span', {}, [`Asignación del año `]),
-        el('strong', {style:'color:var(--mdc-on-surface)'}, [String(targetYear)]),
-      ]);
-      yearFieldWrap.appendChild(banner);
-      return;
-    }
-    // Modo creación: dropdown editable
+    // Dropdown editable (tanto en creación como edición)
     const lbl = el('label', {
       style:'display:block;font-size:12px;color:var(--mdc-on-surface-medium);margin-bottom:4px;font-weight:500;letter-spacing:0.4px',
     }, ['Año *']);
@@ -4544,7 +4747,7 @@ function openAssignmentDialog(prefill = {}) {
     wrap2.appendChild(sel);
     yearFieldWrap.appendChild(lbl);
     yearFieldWrap.appendChild(wrap2);
-    // Hint dinámico que avisa si el año destino es distinto del visible
+    // Hint dinámico
     const hint = el('div', {
       id: '_year_hint',
       style:'font-size:12px;color:var(--mdc-on-surface-medium);padding:4px 14px 0',
@@ -4555,7 +4758,10 @@ function openAssignmentDialog(prefill = {}) {
   function updateYearHelpText() {
     const hint = yearFieldWrap.querySelector('#_year_hint');
     if (!hint) return;
-    if (targetYear !== state.currentYear) {
+    // En modo edición: avisar si el usuario cambió el año (la asignación se moverá)
+    if (isEdit && targetYear !== originalYear) {
+      hint.innerHTML = `<span style="color:#e65100">ⓘ</span> Cambiaste el año: al guardar, esta asignación se <strong>moverá</strong> de ${originalYear} a ${targetYear}. Se va a eliminar del año ${originalYear} y crear en ${targetYear} con los mismos datos.`;
+    } else if (!isEdit && targetYear !== state.currentYear) {
       hint.innerHTML = `<span style="color:#e65100">ⓘ</span> Esta asignación se guardará en <strong>${targetYear}</strong>. No vas a verla en el cronograma actual hasta que cambies el filtro de Año a ${targetYear}.`;
     } else {
       hint.textContent = '';
@@ -4587,28 +4793,41 @@ function openAssignmentDialog(prefill = {}) {
   });
 
   // Helper: reconstruir las opciones de los selects start/end cuando cambia targetYear.
-  // Preserva la selección si todavía es válida en el año nuevo; si no, resetea a 0.
+  // Mapeo por NOMBRE DE MES (no por índice de slot): si la asignación era "May·S2" en
+  // 2025 (idx 1), al cambiar a 2026 debe seguir siendo "May·S2" (idx 17, no idx 1).
+  // Si el mes no existe en el año destino, cae al primer slot.
+  let prevMeses = getTargetMeses().slice(); // los meses del año actualmente mostrado
   function refreshSlotSelects() {
+    const newMeses = getTargetMeses();
     slotOpts = buildSlotOpts();
     const newTotal = slotOpts.length;
     [startField, endField].forEach(f => {
       const sel = f.input;
       if (!sel) return;
       const currentVal = parseInt(sel.value);
+      // Antes de regenerar opciones: traducir el slot actual al mes/semana
+      // y mapear al nuevo año.
+      let newVal = 0;
+      if (!isNaN(currentVal) && currentVal >= 0) {
+        const prevMonthIdx = Math.floor(currentVal / WEEKS_PER_MONTH);
+        const prevWeekIdx = currentVal % WEEKS_PER_MONTH;
+        const monthName = prevMeses[prevMonthIdx];
+        const newMonthIdx = newMeses.indexOf(monthName);
+        if (newMonthIdx !== -1) {
+          newVal = newMonthIdx * WEEKS_PER_MONTH + prevWeekIdx;
+        }
+        // Si el mes no existe en el destino, queda en 0
+      }
       sel.innerHTML = '';
       slotOpts.forEach(opt => {
         const o = document.createElement('option');
         o.value = opt.value; o.textContent = opt.label;
         sel.appendChild(o);
       });
-      // Preservar valor si sigue siendo válido
-      if (!isNaN(currentVal) && currentVal < newTotal) {
-        sel.value = String(currentVal);
-      } else {
-        sel.value = '0';
-      }
+      sel.value = String(Math.min(newVal, newTotal - 1));
     });
     N_SLOTS = newTotal;
+    prevMeses = newMeses.slice(); // actualizar para próximo cambio
   }
 
   // Construcción inicial
@@ -4642,16 +4861,50 @@ function openAssignmentDialog(prefill = {}) {
     }
 
     // ===== Determinar año destino =====
-    // En modo edición: targetYear ya está fijado al año actual (no se cambia).
-    // En modo creación: targetYear es lo que el usuario eligió en el dropdown.
-    const isCrossYear = !isEdit && targetYear !== state.currentYear;
+    // Cross-year aplica tanto en creación (año destino != año visible) como en
+    // edición (usuario cambió el año en el dropdown durante la edición).
+    const isEditCrossYear = isEdit && targetYear !== originalYear;
+    const isCrossYear = (!isEdit && targetYear !== state.currentYear) || isEditCrossYear;
+
+    // === Caso especial: EDICIÓN con cambio de año ===
+    // El usuario cambió el año en el dropdown. Comportamiento: MOVER la asignación.
+    // 1) Borrar la asignación del año original (state.allYears[originalYear])
+    // 2) Crear la nueva en el año destino (state.allYears[targetYear])
+    // Aprovechamos que el flujo de "creación cross-year" más abajo ya sabe crear en
+    // un año distinto al visible. Sólo tenemos que limpiar el rango original primero.
+    if (isEditCrossYear) {
+      // Persistir cambios pendientes del año visible al store
+      syncYearFromData();
+      // Asegurar que ambos años existen en allYears
+      const peopleIds = state.data.people.map(p => p.id);
+      if (!state.allYears[originalYear]) state.allYears[originalYear] = makeEmptyLanesForYear(originalYear, peopleIds);
+      if (!state.allYears[targetYear]) state.allYears[targetYear] = makeEmptyLanesForYear(targetYear, peopleIds);
+
+      // Borrar la asignación original del año origen.
+      // El prefill trae personId, laneIdx, start, end, projectName: usamos eso para
+      // limpiar SOLO los slots que tienen ese proyecto en el rango (no tocamos vecinos).
+      const origLanes = state.allYears[originalYear].lanesPerPerson[prefill.personId];
+      if (origLanes && origLanes[prefill.laneIdx]) {
+        const origLane = origLanes[prefill.laneIdx];
+        for (let i = prefill.start; i < prefill.end; i++) {
+          if (i >= 0 && i < origLane.length && slotProject(origLane[i]) === prefill.projectName) {
+            origLane[i] = null;
+          }
+        }
+      }
+
+      // Si el año visible ES el origen, refrescar state.data para que la UI vea el borrado
+      if (state.currentYear === originalYear) {
+        syncDataFromYear();
+      }
+    }
 
     // Si la asignación va a un año distinto del visible, conmutamos temporalmente
     // state.data al año destino para reusar toda la lógica existente. Volvemos al
     // final. NO llamamos a switchYear() para evitar render/save intermedio.
-    const originalYear = state.currentYear;
+    const visibleYearBefore = state.currentYear;
     if (isCrossYear) {
-      // Persistir el año original primero
+      // Persistir el año visible primero
       syncYearFromData();
       // Asegurar que el año destino existe
       if (!state.allYears[targetYear]) {
@@ -4689,11 +4942,20 @@ function openAssignmentDialog(prefill = {}) {
         laneIdx = person.lanes.length - 1;
       } else {
         laneIdx = parseInt(laneSel);
+        // En edit-cross-year, el laneIdx puede apuntar a un carril que no existe
+        // en el año destino. Si es así, crear uno nuevo en el destino.
+        if (isEditCrossYear && (!person.lanes || laneIdx >= person.lanes.length)) {
+          while (person.lanes.length <= laneIdx) {
+            person.lanes.push(Array(TARGET_N_SLOTS).fill(null));
+          }
+        }
       }
 
-      // Limpiar el rango original si está en el mismo carril
+      // Limpiar el rango original si está en el mismo carril Y el mismo año.
+      // Si es cross-year (cambio de año), el rango original ya se limpió arriba en
+      // state.allYears[originalYear], así que NO tocamos el lane del año destino.
       // (sólo limpiamos los slots que tienen el proyecto original, para no tocar otras asignaciones)
-      if (prefill.personId === personId && prefill.laneIdx === laneIdx) {
+      if (!isEditCrossYear && prefill.personId === personId && prefill.laneIdx === laneIdx) {
         const lane = person.lanes[prefill.laneIdx];
         for (let i = prefill.start; i < prefill.end; i++) {
           if (slotProject(lane[i]) === prefill.projectName) lane[i] = null;
@@ -4822,10 +5084,10 @@ function openAssignmentDialog(prefill = {}) {
     });
 
     // Si la asignación fue a un año distinto del visible, persistir el año destino
-    // y volver al año original que el usuario estaba viendo.
+    // y volver al año visible que el usuario estaba viendo.
     if (isCrossYear) {
       syncYearFromData();           // persiste el año destino con las nuevas asignaciones
-      state.currentYear = originalYear;
+      state.currentYear = visibleYearBefore;
       syncDataFromYear();            // restaura state.data al año visible
     }
 
@@ -5113,6 +5375,14 @@ function showDownloadMenu(event) {
       el('div', {class: 'mat-menu-item-content'}, [
         el('span', {}, ['JSON (backup)']),
         el('span', {class: 'mat-menu-item-hint'}, ['Estructura completa para reimportar']),
+      ]),
+    ]),
+    el('div', {class: 'mat-menu-divider'}),
+    el('button', {class: 'mat-menu-item', onclick: () => { closeMenu(); openMoveAssignmentsBetweenYearsDialog(); }}, [
+      icon('compare_arrows'),
+      el('div', {class: 'mat-menu-item-content'}, [
+        el('span', {}, ['Mover asignaciones entre años']),
+        el('span', {class: 'mat-menu-item-hint'}, ['Migración masiva con backup automático']),
       ]),
     ]),
   ]);
