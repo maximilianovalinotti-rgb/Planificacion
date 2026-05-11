@@ -94,7 +94,20 @@
     padding: 0 16px;
     position: sticky; top: 64px; z-index: 95;
     overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
     box-shadow: var(--elev-1);
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Scrollbar fina y discreta para las tabs (Material) */
+  .mat-tab-group::-webkit-scrollbar { height: 3px; }
+  .mat-tab-group::-webkit-scrollbar-track { background: transparent; }
+  .mat-tab-group::-webkit-scrollbar-thumb {
+    background: var(--mdc-divider);
+    border-radius: 2px;
+  }
+  .mat-tab-group::-webkit-scrollbar-thumb:hover {
+    background: var(--mdc-on-surface-medium);
   }
   .mat-tab {
     background: transparent; border: none; cursor: pointer;
@@ -103,13 +116,29 @@
     text-transform: uppercase; letter-spacing: 0.0892857143em;
     color: var(--mdc-on-surface-medium);
     border-bottom: 2px solid transparent;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
     display: flex; align-items: center; gap: 8px;
     white-space: nowrap;
     position: relative;
+    flex-shrink: 0; /* evita que las tabs se compriman cuando hay overflow */
   }
   .mat-tab:hover { background: var(--mdc-hover); color: var(--mdc-on-surface); }
+  .mat-tab:focus-visible {
+    outline: none;
+    background: var(--mdc-hover);
+  }
   .mat-tab.active { color: var(--mdc-primary); border-bottom-color: var(--mdc-primary); }
+  /* Ripple effect Material en click sobre tab */
+  .mat-tab::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: currentColor;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .mat-tab:active::after { opacity: 0.08; }
   .mat-tab .mat-icon { font-size: 20px; }
   .mat-tab .badge {
     background: var(--mdc-warn); color: white;
@@ -397,12 +426,20 @@
   .empty-state p { font-size: 14px; max-width: 360px; margin: 0 auto 24px; }
 
   /* ============ GANTT SPECIFIC ============ */
+  /* Mismo enfoque que .by-resource-wrap:
+     - Poca data → wrap toma alto natural (sin whitespace interno)
+     - Mucha data → se limita al max-height y aparecen scrollbars internas (X e Y)
+     Beneficios:
+     - El header de meses (.gantt-meses) con position:sticky;top:0 queda fijo arriba
+       cuando scrolleás vertical (antes no funcionaba porque el scroll era de la página)
+     - La scrollbar horizontal queda dentro del viewport, accesible sin tener que
+       scrollear hasta el final */
   .gantt-wrap {
     background: white;
     border-radius: 4px;
     box-shadow: var(--elev-1);
-    overflow-x: auto;
-    overflow-y: visible;
+    overflow: auto;
+    max-height: calc(100vh - 210px);
   }
   .gantt {
     display: grid;
@@ -417,7 +454,8 @@
     text-transform: uppercase; letter-spacing: 0.5px;
     grid-row: span 2;
     display: flex; align-items: center;
-    position: sticky; z-index: 5;
+    /* Sticky en ambos ejes: top:0 (vertical) + left dinámico por clase (horizontal) */
+    position: sticky; top: 0; z-index: 6;
   }
   .gantt-corner.col-recurso { left: 0; }
   .gantt-corner.col-proyecto {
@@ -427,6 +465,8 @@
   .gantt-meses {
     background: var(--mdc-primary); color: white;
     display: grid; grid-template-columns: repeat(8, 1fr);
+    /* Header de meses sticky verticalmente al scrollear el wrap hacia abajo */
+    position: sticky; top: 0; z-index: 4;
   }
   .gantt-q {
     text-align: center; padding: 8px 4px;
@@ -438,6 +478,9 @@
   .gantt-semanas {
     background: var(--mdc-primary-dark); color: white;
     display: grid; grid-template-columns: repeat(32, 1fr);
+    /* Sticky debajo del header de meses. top = altura aproximada de gantt-q
+       (padding:8px+8px + font 12px*1.2 ≈ 30px). Si el header crece, ajustar acá. */
+    position: sticky; top: 30px; z-index: 4;
   }
   .gantt-s {
     text-align: center; padding: 4px 2px;
@@ -750,6 +793,349 @@
   }
   .year-select option { color: var(--mdc-on-surface); font-weight: 400; }
 
+  /* ============ BANNER DE FILTROS ACTIVOS ============ */
+  .active-filters-banner {
+    background: #fff3e0;
+    border: 1px solid #ffb74d;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-top: 10px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font: 400 13px Roboto;
+    color: #bf360c;
+  }
+  .active-filters-banner .material-icons { color: #e65100; }
+  .active-filters-banner .afb-title {
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .active-filters-banner .afb-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: white;
+    border: 1px solid #ffb74d;
+    border-radius: 16px;
+    padding: 4px 10px 4px 12px;
+    font: 400 12px Roboto;
+    color: #bf360c;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .active-filters-banner .afb-chip:hover {
+    background: #ffe0b2;
+    border-color: #e65100;
+  }
+  .active-filters-banner .afb-chip-text {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .active-filters-banner .afb-chip-x {
+    font-size: 14px !important;
+    color: #e65100 !important;
+  }
+  .active-filters-banner .afb-clear-all {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid #e65100;
+    color: #e65100;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font: 500 12px Roboto;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .active-filters-banner .afb-clear-all:hover {
+    background: #e65100;
+    color: white;
+  }
+
+  /* ============ VIEW: POR RECURSO / POR PROYECTOS (transpuesta) ============
+     max-height (NO height fijo): cuando el contenido es chico, el wrap toma el alto
+     natural del contenido (sin espacio blanco interno, igual al Cronograma).
+     Cuando el contenido es alto, se limita al max-height y aparecen scrollbars internas
+     (horizontal + vertical) que quedan SIEMPRE accesibles dentro del viewport.
+     200px = header(64) + tabs(62) + main padding-y(48) + footer(39) - margen(13). */
+  .by-resource-wrap {
+    background: white;
+    border-radius: 4px;
+    overflow: auto;
+    max-height: calc(100vh - 210px);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .br-grid {
+    display: grid;
+    /* width y grid-template-columns se setean inline dinámicamente.
+       Cuando hay pocos recursos: grid se estira a 100% del wrap.
+       Cuando hay muchos: minWidth fuerza scroll horizontal. */
+  }
+  .br-grid > * { box-sizing: border-box; }
+
+  /* Header: corner + nombres de recursos */
+  .br-corner {
+    background: var(--mdc-primary);
+    color: white;
+    padding: 12px 16px;
+    font: 500 12px Roboto;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: 0; left: 0;
+    z-index: 10;
+    border-right: 1px solid rgba(255,255,255,0.15);
+  }
+  .br-corner .material-icons { font-size: 18px; }
+
+  .br-person-header {
+    background: var(--mdc-primary);
+    color: white;
+    padding: 8px 10px;
+    text-align: center;
+    border-right: 1px solid rgba(255,255,255,0.15);
+    position: sticky; top: 0;
+    z-index: 5;
+    display: flex; flex-direction: column; justify-content: center;
+    overflow: hidden;
+  }
+  .br-person-name {
+    font: 500 13px Roboto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .br-person-cat {
+    font: 400 10px Roboto;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Divisor del mes (ocupa toda la fila) — banda destacada para ubicación rápida */
+  .br-month-divider {
+    background: linear-gradient(90deg, var(--mdc-primary) 0%, var(--mdc-primary-light) 70%, var(--mdc-primary-50) 100%);
+    color: white;
+    padding: 12px 20px;
+    font: 700 14px Roboto;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-top: 3px solid var(--mdc-primary-dark);
+    border-bottom: 1px solid var(--mdc-primary-dark);
+    position: sticky; left: 0;
+    z-index: 3;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .br-month-bullet {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.3);
+    flex-shrink: 0;
+  }
+  .br-month-divider .material-icons {
+    font-family: 'Material Icons' !important;
+    font-size: 18px;
+    font-weight: normal;
+    letter-spacing: normal;
+    text-transform: none;
+    opacity: 0.9;
+  }
+
+  .br-empty-month {
+    padding: 14px 16px;
+    color: var(--mdc-on-surface-medium);
+    font: italic 13px Roboto;
+    border-bottom: 1px solid var(--mdc-divider);
+    background: #fafafa;
+    position: sticky; left: 0;
+    z-index: 2;
+  }
+
+  /* Etiqueta del proyecto (sticky a la izquierda) */
+  .br-proj-label {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--mdc-divider);
+    border-right: 1px solid var(--mdc-divider);
+    border-left: 4px solid;
+    background: white;
+    position: sticky; left: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    min-height: 56px;
+  }
+  .br-proj-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .br-proj-name {
+    font: 500 13px Roboto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Celda (recurso × proyecto-mes) — Angular Material design */
+  .br-cell {
+    border-right: 1px solid var(--mdc-divider);
+    border-bottom: 1px solid var(--mdc-divider);
+    padding: 6px 8px;
+    min-height: 56px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+    position: relative;
+    transition: background-color 0.15s ease-out, box-shadow 0.15s ease-out;
+  }
+  /* Ripple Material en click */
+  .br-cell::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: currentColor;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-out;
+  }
+  .br-cell:active::before { opacity: 0.1; }
+  .br-cell:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--mdc-primary);
+  }
+
+  .br-cell-empty {
+    background: white;
+  }
+  .br-cell-empty:hover {
+    background: rgba(63,81,181,0.06);
+  }
+  .br-cell-empty:hover::after {
+    content: 'add';
+    font-family: 'Material Icons';
+    color: var(--mdc-primary);
+    font-size: 22px;
+    opacity: 0.55;
+    align-self: center;
+    line-height: 1;
+  }
+  .br-cell-assigned {
+    /* background y border-left van inline (color del proyecto) */
+    transition: background-color 0.15s ease-out, filter 0.15s ease-out, box-shadow 0.15s ease-out;
+  }
+  .br-cell-assigned:hover {
+    filter: brightness(0.94) saturate(1.1);
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .br-cell-comment {
+    font: 500 11px Roboto;
+    line-height: 1.3;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    text-overflow: ellipsis;
+    word-break: break-word;
+  }
+  .br-cell-weeks {
+    font: 400 10px Roboto;
+    opacity: 0.8;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+  }
+  .br-cell-assigned:not(:has(.br-cell-comment)) .br-cell-weeks {
+    text-align: center;
+    font-size: 11px;
+    margin-top: 0;
+  }
+
+  /* ============ VIEW: POR PROYECTOS (transpuesta + invertida) ============
+     Reusa todos los estilos .br-* . Solo agrega el divisor del proyecto que
+     toma el color del proyecto en lugar del primary. */
+  .bp-project-divider {
+    /* background-color y color van inline (color del proyecto) */
+    padding: 14px 20px;
+    font: 700 14px Roboto;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-top: 3px solid;
+    border-bottom: 1px solid;
+    /* border-color va inline */
+    position: sticky; left: 0;
+    z-index: 3;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: box-shadow 0.2s ease-out;
+  }
+  .bp-project-bullet {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.4);
+    flex-shrink: 0;
+  }
+  /* Etiqueta del mes (sticky a la izquierda, sub-fila del proyecto) */
+  .bp-month-label {
+    padding: 10px 12px 10px 28px; /* indent para indicar jerarquía bajo el proyecto */
+    border-bottom: 1px solid var(--mdc-divider);
+    border-right: 1px solid var(--mdc-divider);
+    border-left: 4px solid;
+    /* border-left-color va inline (color del proyecto) */
+    background: white;
+    position: sticky; left: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    min-height: 56px;
+    font: 500 13px Roboto;
+    color: var(--mdc-on-surface);
+    transition: background-color 0.15s ease-out;
+  }
+  .bp-month-label:hover {
+    background: var(--mdc-hover);
+  }
+  .bp-month-name {
+    font-weight: 500;
+  }
+
+  /* Fade-in suave al renderizar contenido de la vista activa (Material motion) */
+  main > .gantt-wrap,
+  main > .by-resource-wrap,
+  main > .toolbar-row {
+    animation: mat-fade-in 0.18s ease-out;
+  }
+  @keyframes mat-fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
   /* ============ MULTI-SELECT (filtros del Gantt) ============ */
   .multi-select {
     position: relative;
@@ -774,6 +1160,22 @@
   .multi-select.open .multi-select-trigger {
     border-color: var(--mdc-primary);
     box-shadow: 0 0 0 1px var(--mdc-primary);
+  }
+  /* Filtro activo: borde naranja para que el usuario vea de un vistazo que está filtrando */
+  .multi-select.is-filtered .multi-select-trigger {
+    border-color: var(--mdc-warn);
+    background: #fff3e0;
+  }
+  .multi-select.is-filtered .multi-select-trigger:hover {
+    border-color: #d84315;
+  }
+  .multi-select.is-filtered.open .multi-select-trigger {
+    border-color: var(--mdc-warn);
+    box-shadow: 0 0 0 1px var(--mdc-warn);
+  }
+  .multi-select.is-filtered .ms-label {
+    color: #bf360c;
+    font-weight: 500;
   }
   .multi-select-trigger .ms-label {
     flex: 1;
@@ -979,8 +1381,14 @@
   <button class="mat-tab active" data-view="gantt">
     <span class="material-icons">view_timeline</span> Cronograma
   </button>
+  <button class="mat-tab" data-view="by-resource">
+    <span class="material-icons">view_column</span> Por Recurso
+  </button>
+  <button class="mat-tab" data-view="by-project">
+    <span class="material-icons">workspaces</span> Por Proyectos
+  </button>
   <button class="mat-tab" data-view="projects-view">
-    <span class="material-icons">view_module</span> Por Proyecto
+    <span class="material-icons">view_module</span> Detalle Proyectos
   </button>
   <button class="mat-tab" data-view="projects-crud">
     <span class="material-icons">folder</span> Proyectos
@@ -1444,7 +1852,29 @@ function updateSyncIndicator() {
     label = '⚠ Sin conexión — usando datos locales';
     color = '#c62828';
   } else {
-    const time = sync.lastUpdatedAt ? new Date(sync.lastUpdatedAt).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '—';
+    // Formato contextual: "hoy HH:mm" / "ayer HH:mm" / "DD/MM HH:mm" / "DD/MM/YYYY HH:mm" si es de otro año
+    let time = '—';
+    if (sync.lastUpdatedAt) {
+      const d = new Date(sync.lastUpdatedAt);
+      const now = new Date();
+      const sameDay = d.toDateString() === now.toDateString();
+      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+      const isYesterday = d.toDateString() === yesterday.toDateString();
+      const hhmm = d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
+      if (sameDay) {
+        time = `hoy ${hhmm}`;
+      } else if (isYesterday) {
+        time = `ayer ${hhmm}`;
+      } else if (d.getFullYear() === now.getFullYear()) {
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        time = `${dd}/${mm} ${hhmm}`;
+      } else {
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        time = `${dd}/${mm}/${d.getFullYear()} ${hhmm}`;
+      }
+    }
     const who = sync.lastUpdatedBy || '—';
     label = `✓ Sincronizado · última edición ${time} por ${who}`;
     color = '#2e7d32';
@@ -2121,6 +2551,9 @@ function multiSelect({label, items, selected, onChange, allLabel = 'Todos'}) {
 
   function refreshLabel() {
     countSpan.textContent = String(selected.size);
+    // Filtro "activo" = no están TODOS seleccionados (es decir, el usuario filtró algo)
+    const isFiltered = selected.size < items.length;
+    wrap.classList.toggle('is-filtered', isFiltered);
     if (selected.size === 0) {
       labelSpan.textContent = label + ': ninguno';
       labelSpan.classList.add('placeholder');
@@ -2134,11 +2567,11 @@ function multiSelect({label, items, selected, onChange, allLabel = 'Todos'}) {
       const it = items.find(i => i.value === v);
       labelSpan.textContent = `${label}: ${it ? it.label : v}`;
       labelSpan.classList.remove('placeholder');
-      countSpan.style.background = 'var(--mdc-primary)';
+      countSpan.style.background = 'var(--mdc-warn)';
     } else {
       labelSpan.textContent = `${label}: ${selected.size} seleccionados`;
       labelSpan.classList.remove('placeholder');
-      countSpan.style.background = 'var(--mdc-primary)';
+      countSpan.style.background = 'var(--mdc-warn)';
     }
   }
 
@@ -2383,8 +2816,8 @@ function userTypeDropdown() {
 }
 
 function renderTopFilters() {
-  // Filtros aplicables solo en cronograma y por proyecto
-  if (!['gantt','projects-view'].includes(state.view)) return null;
+  // Filtros aplicables en cronograma, por proyecto, por recurso y por proyectos (vistas nuevas)
+  if (!['gantt','by-resource','by-project','projects-view'].includes(state.view)) return null;
 
   // Lista de proyectos disponibles para filtrar: catálogo + proyectos que aparecen en lanes
   // (incluye 'Vac' y similares aunque no estén en el catálogo)
@@ -2491,8 +2924,8 @@ function renderTopFilters() {
   projSelect.wrap.style.minWidth = '260px';
   row.appendChild(projSelect.wrap);
 
-  // Selector de Año (single-select, solo en vista Cronograma)
-  if (state.view === 'gantt') {
+  // Selector de Año (single-select, en Cronograma, Por Recurso y Por Proyectos)
+  if (state.view === 'gantt' || state.view === 'by-resource' || state.view === 'by-project') {
     const yearWrap = el('div', {class: 'year-select-wrap'});
     const yearLabel = el('span', {class: 'year-select-label'}, ['Año:']);
     const yearSel = el('select', {
@@ -2509,8 +2942,8 @@ function renderTopFilters() {
     row.appendChild(yearWrap);
   }
 
-  // Multi-select: Meses (solo en vista Cronograma)
-  if (state.view === 'gantt') {
+  // Multi-select: Meses (en Cronograma, Por Recurso y Por Proyectos)
+  if (state.view === 'gantt' || state.view === 'by-resource' || state.view === 'by-project') {
     const monthItems = state.data.meses.map((m, i) => ({
       value: i, label: m, color: '#3f51b5',
     }));
@@ -2535,14 +2968,76 @@ function renderTopFilters() {
     title: 'Aplicar búsqueda',
   }));
 
-  if (state.view === 'gantt') {
+  if (state.view === 'gantt' || state.view === 'by-resource' || state.view === 'by-project') {
     row.appendChild(btn('Nueva asignación', {raised: true, icon: 'add_task', onclick: openAssignmentDialog}));
+  }
+
+  // === Detectar y mostrar banner de filtros activos ===
+  // Computamos qué filtros están activos para mostrar un aviso visible y permitir limpiarlos.
+  const activeFilters = [];
+  if (state.searchApplied && state.searchApplied.trim()) {
+    activeFilters.push({ key: 'search', label: `Búsqueda: "${state.searchApplied}"`, clear: () => {
+      state.search = ''; state.searchApplied = ''; render();
+    }});
+  }
+  if (state.activeCats.size < CATS.length) {
+    const catList = CATS.filter(c => state.activeCats.has(c));
+    activeFilters.push({ key: 'sections', label: `Secciones: ${catList.length === 0 ? 'ninguna' : catList.join(', ')}`, clear: () => {
+      state.activeCats = new Set(CATS); render();
+    }});
+  }
+  if (state.activeProjects && state.activeProjects.size < allProjects.length) {
+    activeFilters.push({ key: 'projects', label: `Proyectos: ${state.activeProjects.size} de ${allProjects.length}`, clear: () => {
+      state.activeProjects = new Set(allProjects); render();
+    }});
+  }
+  if (state.activeMonths && state.activeMonths.size < monthIdxs.length) {
+    activeFilters.push({ key: 'months', label: `Meses: ${state.activeMonths.size} de ${monthIdxs.length}`, clear: () => {
+      state.activeMonths = new Set(monthIdxs); render();
+    }});
+  }
+
+  // Si hay filtros activos, agregar un banner visible debajo de los filtros
+  if (activeFilters.length > 0) {
+    const banner = el('div', {class: 'active-filters-banner'}, [
+      el('span', {class: 'material-icons', style: 'font-size:18px'}, ['filter_alt']),
+      el('span', {class: 'afb-title'}, [`${activeFilters.length} filtro${activeFilters.length === 1 ? '' : 's'} activo${activeFilters.length === 1 ? '' : 's'}:`]),
+    ]);
+    activeFilters.forEach(f => {
+      const chip = el('button', {
+        class: 'afb-chip',
+        type: 'button',
+        title: 'Click para quitar este filtro',
+        onclick: f.clear,
+      }, [
+        el('span', {class: 'afb-chip-text'}, [f.label]),
+        el('span', {class: 'material-icons afb-chip-x'}, ['close']),
+      ]);
+      banner.appendChild(chip);
+    });
+    // Botón "Limpiar todos"
+    if (activeFilters.length > 1) {
+      banner.appendChild(el('button', {
+        class: 'afb-clear-all',
+        type: 'button',
+        onclick: () => {
+          state.search = ''; state.searchApplied = '';
+          state.activeCats = new Set(CATS);
+          state.activeProjects = new Set(allProjects);
+          state.activeMonths = new Set(monthIdxs);
+          render();
+        },
+      }, ['Limpiar todos']));
+    }
+    // Empaquetar row + banner
+    const wrap2 = el('div');
+    wrap2.appendChild(row);
+    wrap2.appendChild(banner);
+    return wrap2;
   }
 
   return row;
 }
-
-// ============ FAB CONTEXTUAL ============
 function renderFab() {
   const cont = $('#fab-container');
   cont.innerHTML = '';
@@ -2551,7 +3046,7 @@ function renderFab() {
     fab = el('button', {class: 'mat-fab', onclick: () => openProjectDialog(), title: 'Nuevo proyecto'}, [icon('add')]);
   } else if (state.view === 'people-crud') {
     fab = el('button', {class: 'mat-fab', onclick: () => openPersonDialog(), title: 'Nuevo recurso'}, [icon('person_add')]);
-  } else if (state.view === 'gantt') {
+  } else if (state.view === 'gantt' || state.view === 'by-resource' || state.view === 'by-project') {
     fab = el('button', {class: 'mat-fab', onclick: openAssignmentDialog, title: 'Nueva asignación'}, [icon('add_task')]);
   }
   if (fab) cont.appendChild(fab);
@@ -2879,7 +3374,474 @@ function renderConflicts() {
   main.appendChild(grid);
 }
 
-// ============ VIEW: PROJECTS (cards by type) ============
+// ============ VIEW: POR RECURSO (transpuesta: recursos en columnas, meses + proyectos en filas) ============
+function renderByResource() {
+  const main = $('#main');
+  const wrap = el('div', {class: 'by-resource-wrap'});
+
+  // Filtros superiores (año, meses, etc.)
+  const topFilters = renderTopFilters();
+  if (topFilters) wrap.appendChild(topFilters);
+
+  // Personas filtradas (respeta búsqueda, tipo, sección, proyectos)
+  const peopleAll = getFilteredPeople();
+  // Ordenar como en la vista Cronograma: por categoría según el orden de CATS, luego por nombre
+  const people = peopleAll.slice().sort((a, b) =>
+    (CATS.indexOf(a.category) - CATS.indexOf(b.category)) || a.name.localeCompare(b.name)
+  );
+
+  if (people.length === 0) {
+    wrap.appendChild(el('div', {style:'padding:48px;text-align:center;color:var(--mdc-on-surface-medium);font-size:14px'}, [
+      el('p', {style:'margin-bottom:8px'}, ['No hay recursos visibles con los filtros actuales.']),
+      el('p', {style:'font-size:13px'}, ['Probá ajustar los filtros de Sección, Proyectos o la búsqueda.']),
+    ]));
+    main.appendChild(wrap);
+    return;
+  }
+
+  // Meses visibles (según filtro de Meses)
+  const allMonths = state.data.meses.map((mes, idx) => ({mes, idx}));
+  const visibleMonths = state.activeMonths
+    ? allMonths.filter(m => state.activeMonths.has(m.idx))
+    : allMonths;
+
+  if (visibleMonths.length === 0) {
+    wrap.appendChild(el('div', {style:'padding:48px;text-align:center;color:var(--mdc-on-surface-medium);font-size:14px'}, [
+      'No hay meses seleccionados. Ajustá el filtro de Meses arriba.',
+    ]));
+    main.appendChild(wrap);
+    return;
+  }
+
+  // Helper: dado una persona y un mes, devuelve un mapa proyecto → array de slots usados (índices 0..3 = S1..S4).
+  // Recorre TODOS los lanes de la persona buscando asignaciones en los 4 slots del mes.
+  function projectsByPersonMonth(person, monthIdx) {
+    const startSlot = monthIdx * WEEKS_PER_MONTH;
+    const out = new Map(); // projectName -> { weeks: Set<0..3>, comments: Set<string> }
+    person.lanes.forEach(lane => {
+      for (let w = 0; w < WEEKS_PER_MONTH; w++) {
+        const slot = lane[startSlot + w];
+        if (!slot) continue;
+        const pname = slotProject(slot);
+        if (!pname) continue;
+        if (!out.has(pname)) out.set(pname, { weeks: new Set(), comments: new Set() });
+        const e = out.get(pname);
+        e.weeks.add(w);
+        const c = slotComment(slot);
+        if (c) e.comments.add(c);
+      }
+    });
+    return out;
+  }
+
+  // Para cada mes: determinar qué proyectos tienen al menos UN recurso (de los visibles) asignado.
+  // Solo respetamos también el filtro de proyectos del usuario.
+  const projFilter = state.activeProjects;
+  function isProjectAllowed(name) {
+    if (!projFilter) return true;
+    return projFilter.has(name);
+  }
+
+  // Estructura final: [{ mes, idx, projects: [string], cellsByProject: Map<projectName, Map<personId, {weeksLabel, commentsLabel, color}>>}]
+  const monthBlocks = visibleMonths.map(({mes, idx: mIdx}) => {
+    // Recolectar todos los proyectos activos en este mes
+    const projAggregates = new Map(); // projectName -> Map<personId, {weeks, comments}>
+    people.forEach(person => {
+      const m = projectsByPersonMonth(person, mIdx);
+      m.forEach((data, pname) => {
+        if (!isProjectAllowed(pname)) return;
+        if (!projAggregates.has(pname)) projAggregates.set(pname, new Map());
+        projAggregates.get(pname).set(person.id, data);
+      });
+    });
+    // Ordenar proyectos alfabéticamente
+    const projects = Array.from(projAggregates.keys()).sort((a, b) => a.localeCompare(b));
+    return { mes, idx: mIdx, projects, cellsByProject: projAggregates };
+  });
+
+  // ===== Construir el grid =====
+  // Columna 1 fija (sticky left): label del mes/proyecto (260px)
+  // Columnas de recursos: minmax(140px, 1fr) → al menos 140px, pero se estiran si hay espacio
+  // El grid se aplica con width:100% para llenar el contenedor cuando hay pocas columnas,
+  // y permite scroll horizontal naturalmente cuando son muchas (porque la suma de min excede el viewport).
+  const COL_LABEL_W = 260;
+  const COL_PERSON_W_MIN = 140;
+
+  const grid = el('div', {class: 'br-grid'});
+  grid.style.gridTemplateColumns = `${COL_LABEL_W}px repeat(${people.length}, minmax(${COL_PERSON_W_MIN}px, 1fr))`;
+  grid.style.width = '100%';
+  grid.style.minWidth = `${COL_LABEL_W + people.length * COL_PERSON_W_MIN}px`;
+
+  // === Header row: label "RECURSO →" + nombres de personas ===
+  grid.appendChild(el('div', {class: 'br-corner'}, [
+    el('span', {class: 'material-icons'}, ['view_column']),
+    el('span', {}, ['Mes / Proyecto']),
+  ]));
+  people.forEach(p => {
+    const c = el('div', {class: 'br-person-header', title: `${p.name} · ${p.category}`}, [
+      el('div', {class: 'br-person-name'}, [p.name]),
+      el('div', {class: 'br-person-cat'}, [p.category]),
+    ]);
+    grid.appendChild(c);
+  });
+
+  // === Body: por cada mes, divisor + una fila por proyecto ===
+  monthBlocks.forEach(block => {
+    // Divisor del mes (ocupa toda la fila) — banda destacada
+    const divider = el('div', {class: 'br-month-divider'}, [
+      el('span', {class: 'br-month-bullet'}),
+      block.mes.toUpperCase(),
+    ]);
+    divider.style.gridColumn = `1 / ${people.length + 2}`;
+    grid.appendChild(divider);
+
+    if (block.projects.length === 0) {
+      // Mes sin proyectos: una fila vacía indicando "Sin asignaciones"
+      const empty = el('div', {class: 'br-empty-month'}, ['Sin asignaciones en este mes']);
+      empty.style.gridColumn = `1 / ${people.length + 2}`;
+      grid.appendChild(empty);
+      return;
+    }
+
+    block.projects.forEach(projName => {
+      const c = projectColor(projName);
+      // Etiqueta del proyecto (sticky left)
+      const label = el('div', {class: 'br-proj-label'}, [
+        el('span', {class: 'br-proj-dot', style: `background:${c.dark}`}),
+        el('span', {class: 'br-proj-name', title: projName}, [projName]),
+      ]);
+      label.style.borderLeftColor = c.dark;
+      grid.appendChild(label);
+
+      // Una celda por recurso
+      const personMap = block.cellsByProject.get(projName) || new Map();
+      people.forEach(person => {
+        const cellData = personMap.get(person.id);
+        if (!cellData) {
+          // Vacío
+          const cell = el('div', {
+            class: 'br-cell br-cell-empty',
+            title: `${person.name} libre en ${projName} durante ${block.mes}`,
+            onclick: () => {
+              // Abrir modal de creación pre-llenado con esta persona, este proyecto, este mes
+              const startSlot = block.idx * WEEKS_PER_MONTH;
+              openAssignmentDialog({
+                personId: person.id,
+                projectName: projName,
+                start: startSlot,
+                end: startSlot + WEEKS_PER_MONTH,
+              });
+            },
+          });
+          grid.appendChild(cell);
+          return;
+        }
+        // Asignado: mostrar comentario + rango de semanas
+        const weeksLabel = formatWeeksRange(cellData.weeks);
+        const commentText = Array.from(cellData.comments).join(' · ') || '';
+        const cell = el('div', {
+          class: 'br-cell br-cell-assigned',
+          style: `background:${c.light};color:${c.text};border-left:4px solid ${c.dark}`,
+          title: `${person.name} · ${projName}${commentText ? '\n"' + commentText + '"' : ''}\nSemanas: ${weeksLabel}`,
+          onclick: () => {
+            // Abrir modal en modo edición con la primera asignación encontrada de ese proyecto-mes
+            const startSlot = block.idx * WEEKS_PER_MONTH;
+            // Buscar la primera asignación de esa persona y ese proyecto que toque el rango del mes
+            let foundLane = null, foundStart = null, foundEnd = null, foundComment = '';
+            for (let li = 0; li < person.lanes.length; li++) {
+              const lane = person.lanes[li];
+              for (let i = startSlot; i < startSlot + WEEKS_PER_MONTH; i++) {
+                if (lane[i] && slotProject(lane[i]) === projName) {
+                  // Encontrar el rango contiguo
+                  let s = i;
+                  while (s > 0 && lane[s-1] && slotProject(lane[s-1]) === projName && slotComment(lane[s-1]) === slotComment(lane[i])) s--;
+                  let e = i;
+                  while (e < lane.length - 1 && lane[e+1] && slotProject(lane[e+1]) === projName && slotComment(lane[e+1]) === slotComment(lane[i])) e++;
+                  foundLane = li;
+                  foundStart = s;
+                  foundEnd = e + 1; // exclusive
+                  foundComment = slotComment(lane[i]);
+                  break;
+                }
+              }
+              if (foundLane != null) break;
+            }
+            if (foundLane != null) {
+              openAssignmentDialog({
+                _edit: true,
+                personId: person.id,
+                projectName: projName,
+                laneIdx: foundLane,
+                start: foundStart,
+                end: foundEnd,
+                comment: foundComment,
+              });
+            }
+          },
+        }, [
+          commentText
+            ? el('div', {class: 'br-cell-comment', title: commentText}, [commentText])
+            : null,
+          el('div', {class: 'br-cell-weeks'}, [weeksLabel]),
+        ]);
+        grid.appendChild(cell);
+      });
+    });
+  });
+
+  wrap.appendChild(grid);
+  main.appendChild(wrap);
+}
+
+// Helper: dado un Set de índices de semana (0..3), devuelve un texto compacto.
+// Ejemplos: {0,1,2,3} → "S1–S4", {0,1} → "S1–S2", {0,2} → "S1, S3", {2} → "S3"
+function formatWeeksRange(weekSet) {
+  const sorted = Array.from(weekSet).sort((a,b) => a - b);
+  if (sorted.length === 0) return '';
+  if (sorted.length === WEEKS_PER_MONTH) return `${WEEK_LABELS[0]}–${WEEK_LABELS[WEEKS_PER_MONTH - 1]}`;
+  // Detectar si es un rango contiguo
+  const isContiguous = sorted.every((v, i) => i === 0 || v === sorted[i-1] + 1);
+  if (isContiguous && sorted.length > 1) {
+    return `${WEEK_LABELS[sorted[0]]}–${WEEK_LABELS[sorted[sorted.length-1]]}`;
+  }
+  return sorted.map(w => WEEK_LABELS[w]).join(', ');
+}
+
+// ============ VIEW: POR PROYECTOS (transpuesta + invertida: recursos en columnas, proyectos > meses en filas) ============
+// Estructura simétrica a "Por Recurso" pero con jerarquía invertida:
+// - "Por Recurso":   mes → proyectos (un proyecto por fila bajo cada mes)
+// - "Por Proyectos": proyecto → meses (un mes por fila bajo cada proyecto)
+function renderByProject() {
+  const main = $('#main');
+  const wrap = el('div', {class: 'by-resource-wrap'}); // reusa el contenedor
+
+  // Filtros superiores (año, meses, etc.)
+  const topFilters = renderTopFilters();
+  if (topFilters) wrap.appendChild(topFilters);
+
+  // Personas filtradas (respeta búsqueda, tipo, sección, proyectos)
+  const peopleAll = getFilteredPeople();
+  const people = peopleAll.slice().sort((a, b) =>
+    (CATS.indexOf(a.category) - CATS.indexOf(b.category)) || a.name.localeCompare(b.name)
+  );
+
+  if (people.length === 0) {
+    wrap.appendChild(el('div', {style:'padding:48px;text-align:center;color:var(--mdc-on-surface-medium);font-size:14px'}, [
+      el('p', {style:'margin-bottom:8px'}, ['No hay recursos visibles con los filtros actuales.']),
+      el('p', {style:'font-size:13px'}, ['Probá ajustar los filtros de Sección, Proyectos o la búsqueda.']),
+    ]));
+    main.appendChild(wrap);
+    return;
+  }
+
+  // Meses visibles (según filtro de Meses)
+  const allMonths = state.data.meses.map((mes, idx) => ({mes, idx}));
+  const visibleMonths = state.activeMonths
+    ? allMonths.filter(m => state.activeMonths.has(m.idx))
+    : allMonths;
+
+  if (visibleMonths.length === 0) {
+    wrap.appendChild(el('div', {style:'padding:48px;text-align:center;color:var(--mdc-on-surface-medium);font-size:14px'}, [
+      'No hay meses seleccionados. Ajustá el filtro de Meses arriba.',
+    ]));
+    main.appendChild(wrap);
+    return;
+  }
+
+  // Helper: dado una persona y un mes, devuelve un mapa proyecto → {weeks, comments}
+  // (idéntico al de renderByResource, lo reescribo localmente para mantener autocontenido)
+  function projectsByPersonMonth(person, monthIdx) {
+    const startSlot = monthIdx * WEEKS_PER_MONTH;
+    const out = new Map();
+    person.lanes.forEach(lane => {
+      for (let w = 0; w < WEEKS_PER_MONTH; w++) {
+        const slot = lane[startSlot + w];
+        if (!slot) continue;
+        const pname = slotProject(slot);
+        if (!pname) continue;
+        if (!out.has(pname)) out.set(pname, { weeks: new Set(), comments: new Set() });
+        const e = out.get(pname);
+        e.weeks.add(w);
+        const c = slotComment(slot);
+        if (c) e.comments.add(c);
+      }
+    });
+    return out;
+  }
+
+  // Filtro de proyectos del usuario
+  const projFilter = state.activeProjects;
+  function isProjectAllowed(name) {
+    if (!projFilter) return true;
+    return projFilter.has(name);
+  }
+
+  // === Construir estructura: proyecto → [{ mes, idx, cellsByPerson: Map<personId, {weeks, comments}> }] ===
+  // Recorro todas las personas y todos los meses visibles, agrupando por proyecto.
+  // proyectoData: Map<projectName, Map<monthIdx, Map<personId, {weeks, comments}>>>
+  const proyectoData = new Map();
+  people.forEach(person => {
+    visibleMonths.forEach(({idx: mIdx}) => {
+      const m = projectsByPersonMonth(person, mIdx);
+      m.forEach((data, pname) => {
+        if (!isProjectAllowed(pname)) return;
+        if (!proyectoData.has(pname)) proyectoData.set(pname, new Map());
+        const byMonth = proyectoData.get(pname);
+        if (!byMonth.has(mIdx)) byMonth.set(mIdx, new Map());
+        byMonth.get(mIdx).set(person.id, data);
+      });
+    });
+  });
+
+  // Ordenar proyectos alfabéticamente
+  const sortedProjects = Array.from(proyectoData.keys()).sort((a, b) => a.localeCompare(b));
+
+  if (sortedProjects.length === 0) {
+    wrap.appendChild(el('div', {style:'padding:48px;text-align:center;color:var(--mdc-on-surface-medium);font-size:14px'}, [
+      el('p', {style:'margin-bottom:8px'}, ['No hay proyectos con asignaciones para los filtros actuales.']),
+      el('p', {style:'font-size:13px'}, ['Probá ajustar los filtros de Sección, Proyectos, Meses o la búsqueda.']),
+    ]));
+    main.appendChild(wrap);
+    return;
+  }
+
+  // ===== Construir el grid (mismo layout que renderByResource) =====
+  const COL_LABEL_W = 260;
+  const COL_PERSON_W_MIN = 140;
+
+  const grid = el('div', {class: 'br-grid'});
+  grid.style.gridTemplateColumns = `${COL_LABEL_W}px repeat(${people.length}, minmax(${COL_PERSON_W_MIN}px, 1fr))`;
+  grid.style.width = '100%';
+  grid.style.minWidth = `${COL_LABEL_W + people.length * COL_PERSON_W_MIN}px`;
+
+  // === Header row: label "PROYECTO / MES →" + nombres de personas ===
+  grid.appendChild(el('div', {class: 'br-corner'}, [
+    el('span', {class: 'material-icons'}, ['workspaces']),
+    el('span', {}, ['Proyecto / Mes']),
+  ]));
+  people.forEach(p => {
+    const c = el('div', {class: 'br-person-header', title: `${p.name} · ${p.category}`}, [
+      el('div', {class: 'br-person-name'}, [p.name]),
+      el('div', {class: 'br-person-cat'}, [p.category]),
+    ]);
+    grid.appendChild(c);
+  });
+
+  // === Body: por cada proyecto, divisor + una fila por mes con asignación ===
+  sortedProjects.forEach(projName => {
+    const c = projectColor(projName);
+    const byMonth = proyectoData.get(projName); // Map<monthIdx, Map<personId, data>>
+
+    // Divisor del proyecto (ocupa toda la fila) — banda con el color del proyecto
+    const divider = el('div', {class: 'bp-project-divider'}, [
+      el('span', {class: 'bp-project-bullet'}),
+      projName.toUpperCase(),
+    ]);
+    divider.style.gridColumn = `1 / ${people.length + 2}`;
+    divider.style.background = `linear-gradient(90deg, ${c.dark} 0%, ${c.light} 100%)`;
+    divider.style.color = c.text === '#000' || c.text === 'black' ? '#222' : 'white';
+    divider.style.borderTopColor = c.dark;
+    divider.style.borderBottomColor = c.dark;
+    grid.appendChild(divider);
+
+    // Meses del proyecto: solo aquellos que tienen al menos una asignación, en orden cronológico
+    const monthsWithData = visibleMonths.filter(m => byMonth.has(m.idx));
+
+    if (monthsWithData.length === 0) {
+      // Edge case: el proyecto está pero ninguno de sus meses cae en visibleMonths
+      const empty = el('div', {class: 'br-empty-month'}, ['Sin asignaciones en los meses visibles']);
+      empty.style.gridColumn = `1 / ${people.length + 2}`;
+      grid.appendChild(empty);
+      return;
+    }
+
+    monthsWithData.forEach(({mes, idx: mIdx}) => {
+      // Etiqueta del mes (sticky left, indented bajo el proyecto)
+      const label = el('div', {class: 'bp-month-label'}, [
+        el('span', {class: 'br-proj-dot', style: `background:${c.dark}`}),
+        el('span', {class: 'bp-month-name'}, [mes]),
+      ]);
+      label.style.borderLeftColor = c.dark;
+      grid.appendChild(label);
+
+      // Una celda por recurso
+      const personMap = byMonth.get(mIdx) || new Map();
+      people.forEach(person => {
+        const cellData = personMap.get(person.id);
+        if (!cellData) {
+          // Vacío: click → modal creación pre-llenado
+          const cell = el('div', {
+            class: 'br-cell br-cell-empty',
+            title: `${person.name} libre en ${projName} durante ${mes}`,
+            onclick: () => {
+              const startSlot = mIdx * WEEKS_PER_MONTH;
+              openAssignmentDialog({
+                personId: person.id,
+                projectName: projName,
+                start: startSlot,
+                end: startSlot + WEEKS_PER_MONTH,
+              });
+            },
+          });
+          grid.appendChild(cell);
+          return;
+        }
+        // Asignado: mostrar comentario + rango de semanas
+        const weeksLabel = formatWeeksRange(cellData.weeks);
+        const commentText = Array.from(cellData.comments).join(' · ') || '';
+        const cell = el('div', {
+          class: 'br-cell br-cell-assigned',
+          style: `background:${c.light};color:${c.text};border-left:4px solid ${c.dark}`,
+          title: `${person.name} · ${projName}${commentText ? '\n"' + commentText + '"' : ''}\nSemanas: ${weeksLabel}`,
+          onclick: () => {
+            // Modal en modo edición: buscar la primera asignación contigua de esa persona/proyecto/mes
+            const startSlot = mIdx * WEEKS_PER_MONTH;
+            let foundLane = null, foundStart = null, foundEnd = null, foundComment = '';
+            for (let li = 0; li < person.lanes.length; li++) {
+              const lane = person.lanes[li];
+              for (let i = startSlot; i < startSlot + WEEKS_PER_MONTH; i++) {
+                if (lane[i] && slotProject(lane[i]) === projName) {
+                  let s = i;
+                  while (s > 0 && lane[s-1] && slotProject(lane[s-1]) === projName && slotComment(lane[s-1]) === slotComment(lane[i])) s--;
+                  let e = i;
+                  while (e < lane.length - 1 && lane[e+1] && slotProject(lane[e+1]) === projName && slotComment(lane[e+1]) === slotComment(lane[i])) e++;
+                  foundLane = li;
+                  foundStart = s;
+                  foundEnd = e + 1;
+                  foundComment = slotComment(lane[i]);
+                  break;
+                }
+              }
+              if (foundLane != null) break;
+            }
+            if (foundLane != null) {
+              openAssignmentDialog({
+                _edit: true,
+                personId: person.id,
+                projectName: projName,
+                laneIdx: foundLane,
+                start: foundStart,
+                end: foundEnd,
+                comment: foundComment,
+              });
+            }
+          },
+        }, [
+          commentText
+            ? el('div', {class: 'br-cell-comment', title: commentText}, [commentText])
+            : null,
+          el('div', {class: 'br-cell-weeks'}, [weeksLabel]),
+        ]);
+        grid.appendChild(cell);
+      });
+    });
+  });
+
+  wrap.appendChild(grid);
+  main.appendChild(wrap);
+}
+
+// ============ VIEW: POR PROYECTO ============
 function renderProjectsView() {
   const main = $('#main');
   const filters = renderTopFilters();
@@ -5070,6 +6032,8 @@ function render() {
   }
 
   if (state.view === 'gantt') renderGantt();
+  else if (state.view === 'by-resource') renderByResource();
+  else if (state.view === 'by-project') renderByProject();
   else if (state.view === 'projects-view') renderProjectsView();
   else if (state.view === 'projects-crud') renderProjectsCrud();
   else if (state.view === 'people-crud') renderPeopleCrud();
